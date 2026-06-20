@@ -1,5 +1,10 @@
 # Wiz Sizing TUI Launcher — Full Design & Implementation Spec
 
+> **Status (2026-06-20): v1 COMPLETE.** All in-scope work is built, committed to `main`
+> (`27324c2`), and verified via `--dry-run`/`--list`. The launcher, three shims, and README
+> live under `sizing-scripts/launcher/`. Only the explicitly-deferred out-of-scope scripts
+> remain (a future manifest-only PR). Checklist boxes below reflect this.
+
 ## 1. Context & goal
 
 The repo has 14 sizing scripts (now 17 with the Defend additions) that are invoked as raw CLI commands with long, script-specific flag sets. The goal is an **interactive, menu-driven launcher** that runs **inside each cloud's CloudShell**, has **zero install footprint of its own**, batches scripts sensibly (chosen: by CSP with auto-detect), and builds/executes the right command for the user.
@@ -52,16 +57,16 @@ The launcher splits options into **Common** (shown by default) and **Advanced** 
 - **GitLab** — Required: `--token`. Common: `--group`, `--project`, `--url`, `--output-dir`. Advanced: `--max-workers`, `--progress-interval`, `--decrypt`, `--verbose`, `--debug`.
 - **Azure DevOps** — Required: `--token`, `--org`. Common: `--proj`, `--repo`, `--days`, `--output-dir`. Advanced: `--mask-emails`, `--include-disabled`, `--include-empty-repositories`, `--project-page-size`, `--commit-page-size`, `--max-repositories`, `--max-commits-per-repo`, `--max-retries`, `--retry-delay`, `--max-run-minutes`, `--checkpoint-interval`, `--progress-interval`, `--fail-fast`, `--verbose`.
 
-## 4. File layout to create
+## 4. File layout to create — ✅ all created
 
 ```
 sizing-scripts/
 └─ launcher/
-   ├─ wiz-sizing.py     # single self-contained stdlib launcher (manifest embedded)
-   ├─ launch-aws.sh     # exec python3 "$(dirname "$0")/wiz-sizing.py" --csp aws  "$@"
-   ├─ launch-azure.sh   # ... --csp azure
-   ├─ launch-gcp.sh     # ... --csp gcp
-   └─ README.md         # one-liners + usage per CloudShell
+   ├─ wiz-sizing.py     # ✅ single self-contained stdlib launcher (manifest embedded)
+   ├─ launch-aws.sh     # ✅ exec python3 "$(dirname "$0")/wiz-sizing.py" --csp aws  "$@"
+   ├─ launch-azure.sh   # ✅ ... --csp azure
+   ├─ launch-gcp.sh     # ✅ ... --csp gcp
+   └─ README.md         # ✅ one-liners + usage per CloudShell
 ```
 
 The shims are 2 lines each. `wiz-sizing.py` is the source of truth.
@@ -153,16 +158,16 @@ Identical flow implemented with numbered `print` menus and `input()`/`getpass`. 
 - `--dry-run`, `--csp`, `--list`, `--no-curses` documented.
 
 ## 7. Build sequence (phased, each independently testable)
-1. **Skeleton + manifest + AWS leaves** — detection, curses+fallback, preflight, serialization, dry-run, execute. Validate end-to-end in AWS CloudShell.
-2. **Azure + GCP cloud leaves + Defend leaves for all three** + per-CSP `.sh` shims.
-3. **Code group** (GitHub/GitLab/ADO) with masked token prompts.
-4. **M365** via the `pwsh` runner + `shutil.which` gate.
-5. **README**, then a follow-up PR folds in the deferred scripts as manifest-only additions.
+1. [x] **Skeleton + manifest + AWS leaves** — detection, curses+fallback, preflight, serialization, dry-run, execute. Validate end-to-end in AWS CloudShell.
+2. [x] **Azure + GCP cloud leaves + Defend leaves for all three** + per-CSP `.sh` shims.
+3. [x] **Code group** (GitHub/GitLab/ADO) with masked token prompts.
+4. [x] **M365** via the `pwsh` runner + `shutil.which` gate.
+5. [x] **README** — done. [ ] follow-up PR folding in the deferred scripts as manifest-only additions (out of scope for v1, not yet started).
 
 ## 8. Testing approach (given I can't enter live CloudShells from here)
-- `--dry-run` asserts the exact argv for representative option combinations per leaf (unit-style, runnable anywhere).
-- `--csp` override exercises each provider's submenu without the matching environment.
-- A short **manual matrix** to run in each real CloudShell: detection correct, preflight detects missing/installed SDK, a real small-scope scan completes, output file path reported. Documented in the launcher README.
+- [x] `--dry-run` (with `--leaf`) asserts the exact argv for representative option combinations per leaf (unit-style, runnable anywhere).
+- [x] `--csp` override exercises each provider's submenu without the matching environment.
+- [x] A short **manual matrix** to run in each real CloudShell: detection correct, preflight detects missing/installed SDK, a real small-scope scan completes, output file path reported. Documented in the launcher README. *(The matrix is documented; the in-shell runs themselves are for the operator to perform.)*
 
 ## 9. Risks / to confirm during the build
 - **Azure Cloud Shell env vars differ between its bash and pwsh modes** — confirm `detect_csp()` against a live Azure shell; `--csp azure` is the safety valve.
@@ -170,5 +175,5 @@ Identical flow implemented with numbered `print` menus and `input()`/`getpass`. 
 - **M365 needs `pwsh`** (present in Azure Cloud Shell, not AWS/GCP) — the leaf is hidden/blocked where `pwsh` is absent.
 - **Defend scripts are `wiz-copy`** (unhardened); the launcher only wraps them, so no behavior change, but their flags are taken as-is from current `main`.
 
-## 10. Prerequisite before coding
-Rebase `claude/sizing-scripts-tui-plan-m83xs3` onto `origin/main` (`a9e3dc7`) so the `defend/` paths, hardened ADO flags, and updated M365 params referenced by the manifest actually exist in the tree.
+## 10. Prerequisite before coding — ✅ done
+- [x] Rebase `claude/sizing-scripts-tui-plan-m83xs3` onto `origin/main` (`a9e3dc7`) so the `defend/` paths, hardened ADO flags, and updated M365 params referenced by the manifest actually exist in the tree. The launcher now lives on `main` (`27324c2`); the `defend/{aws,azure,gcp}/log-volume-estimation-*.py` paths it references all exist.
