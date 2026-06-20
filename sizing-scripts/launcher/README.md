@@ -19,18 +19,8 @@ manifest embedded in `wiz-sizing.py`, so adding a script is a data edit.
 
 ## Quick start
 
-### One-line bootstrap (single file, nothing to clone)
-
-`wiz-sizing.py` is a single self-contained file. In any CloudShell you can pull
-just the launcher and run it:
-
-```bash
-curl -fsSL https://downloads.wiz.io/sizing/wiz-sizing.py -o wiz-sizing.py && python3 wiz-sizing.py
-```
-
-When run on its own, the launcher still finds the sizing scripts if they sit in a
-sibling `sizing-scripts/` tree; otherwise it prints where to get them. To run the
-full menu you need the repo present:
+Open your cloud's CloudShell (AWS / Azure / GCP), then clone the repo and run the
+launcher. The scans need the sizing scripts present, so cloning is the normal path:
 
 ```bash
 git clone https://github.com/wiz-sec/wiz-sizing.git
@@ -38,15 +28,58 @@ cd wiz-sizing/sizing-scripts/launcher
 python3 wiz-sizing.py
 ```
 
-The launcher auto-detects which CloudShell it is running in (AWS / Azure / GCP)
-and lands you on that provider's submenu, with a "Switch provider / category"
-item that opens the full menu. Per-CSP shims are provided too:
+That's it — no `pip install` for the launcher itself. It auto-detects which
+CloudShell it is running in and lands you on that provider's submenu, with a
+**Switch provider / category** item that opens the full cross-provider menu.
+
+Per-CSP shims do the same as `--csp`:
 
 ```bash
 ./launch-aws.sh      # same as: python3 wiz-sizing.py --csp aws
 ./launch-azure.sh    # --csp azure
 ./launch-gcp.sh      # --csp gcp
 ```
+
+### Grab just the launcher (inspect / dry-run)
+
+`wiz-sizing.py` is a single self-contained file, so you can pull only the launcher
+to read it, list the menu, or preview commands:
+
+```bash
+curl -fsSL https://downloads.wiz.io/sizing/wiz-sizing.py -o wiz-sizing.py
+python3 wiz-sizing.py --list                 # show the menu leaves
+python3 wiz-sizing.py --dry-run --profile aws  # preview a sweep's commands
+```
+
+Note: to actually *run* a scan the launcher must find the sizing scripts in a
+sibling `sizing-scripts/` tree (i.e. its parent directory). On its own it will
+print where to get them rather than running anything — so for real scans, clone
+the repo as above.
+
+## What happens when you run it
+
+1. **Detection.** The launcher figures out which CloudShell it's in and opens that
+   provider's submenu. `--csp aws|azure|gcp` overrides detection if a signal is
+   wrong.
+2. **Pick what to run.** Either the **★ Recommended full sweep** (top item — see
+   below) or a single script (e.g. *Azure — Cloud resource count*).
+3. **Set options.** Common options show first; an **Advanced options** toggle
+   reveals the rest. Toggles are checkboxes; everything else is an inline text
+   field with its default shown.
+4. **Credentials.** Cloud/Defend scripts use ambient CloudShell auth (no prompt).
+   Code scripts (GitHub/GitLab/ADO) prompt for a token, read masked. See
+   [Credentials](#credentials).
+5. **Dependency preflight.** The launcher import-checks the script's SDK and, if
+   missing, offers to `pip install` it for you. See
+   [Dependency preflight](#dependency-preflight).
+6. **Preview & confirm.** It prints the exact, copy-pasteable command and waits for
+   an explicit `y` before running anything.
+7. **Run.** The script runs with live output (Ctrl-C works); on exit you get the
+   return code and where output was written, then **Run another / Quit**.
+
+**Navigation (full-screen menu):** `↑`/`↓` (or `j`/`k`) to move, `Enter` to
+select / toggle / edit a field, `q` or `Esc` to go back. On a non-TTY or dumb
+terminal it falls back to numbered prompts with the identical flow.
 
 ## Recommended full sweep (one confirmation)
 
@@ -96,6 +129,15 @@ module(s). If they are missing it shows the exact `pip3 install --upgrade …` l
 and offers **[Install now] / [Copy & skip] / [Back]**. "Install now" runs the pip
 command live (honoring `--user` where the script's own hint specifies it, e.g. the
 Azure/GCP Defend scripts) and then re-probes.
+
+## Output files
+
+Each script writes its own CSV. Cloud resource-count scripts honor `--output-dir`
+(default: the current directory); the Defend scripts write into the working
+directory (e.g. `aws-defend-log-volume.csv`), and Azure/GCP Defend also accept
+`--output-filename`. After a run the launcher prints the exit code and the
+directory the output was written to. Scope files the launcher creates
+(`regions.txt`, `subscriptions.txt`, …) are also left in the run directory.
 
 ## Flags
 

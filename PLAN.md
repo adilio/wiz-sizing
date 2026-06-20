@@ -1,13 +1,15 @@
 # Wiz Sizing TUI Launcher — v2 Plan (active)
 
-> **Status (2026-06-20): v2 IMPLEMENTED (pending commit).** All six prioritized items in §C
-> are built in `sizing-scripts/launcher/wiz-sizing.py` and verified: the B1 scope-flag bug is
-> fixed (idfile kind writes `.txt` + bare toggle), ADO now uses `ADO_TOKEN` with org
-> auto-detect, per-CSP "recommended full sweep" profiles run under one confirmation with
-> opt-ins, scope-identity detection (GCP org / Azure tenant / ADO org) is best-effort, the
-> README has a `curl | python3` bootstrap, and a `test_wiz_sizing.py` suite (13 tests, all
-> passing) asserts non-default argv. **Sections 1–10 below are DEPRECATED** — kept for history
-> only; do not implement against them. See [§D](#d-deprecated-v1-spec-below).
+> **Status (2026-06-20): v2 COMPLETE — shipped on `main` (`9b0c684`).** All six prioritized
+> items in §C are built in `sizing-scripts/launcher/wiz-sizing.py`, verified, and committed:
+> the B1 scope-flag bug is fixed (`idfile` kind writes `.txt` + bare toggle), an additional
+> B1-class bug was caught and fixed (AWS Defend has no `--output-dir`), ADO now uses
+> `ADO_TOKEN` with `--org` auto-detect, per-CSP "recommended full sweep" profiles run under one
+> confirmation with M365/AzDO opt-ins, scope-identity detection (GCP org / Azure tenant / ADO
+> org) is best-effort, the README has a `curl | python3` bootstrap, and `test_wiz_sizing.py`
+> (14 tests, all passing) asserts non-default argv. See [§E](#e-v2-completion-record) for the
+> completion record. **Sections 1–10 below are DEPRECATED** — kept for history only; do not
+> implement against them. See [§D](#d-deprecated-v1-spec-below).
 
 ## A. Goal (restated)
 
@@ -110,6 +112,37 @@ to cwd.)
 
 Constraints unchanged from v1: pure stdlib, never import a cloud SDK, never edit the target
 scripts, manifest-driven menu.
+
+---
+
+## E. v2 completion record
+
+**Shipped on `main` in `9b0c684`** ("Launcher v2: fix scope flags, add recommended sweep
+profiles"). Files touched:
+
+| File | What changed |
+|---|---|
+| `sizing-scripts/launcher/wiz-sizing.py` | `idfile` kind + `materialize_idfiles`/`idfile_plan`; `PROFILES`/`PROFILE_OPTINS` + `run_profile`; `DETECTORS` (`detect_gcp_org`/`detect_azure_tenant`/`detect_ado_org`); ADO `ADO_TOKEN` + `--org` detect; corrected `--all` help; removed bad AWS-Defend `--output-dir`; `--set`/`--profile` CLI |
+| `sizing-scripts/launcher/test_wiz_sizing.py` | **New.** 14 unit tests (scope flags, idfile materialization, ADO env, profiles, output-flag regression, `--set` parser) |
+| `sizing-scripts/launcher/README.md` | Bootstrap one-liner, profile + scoping + detection docs, credential conventions, `--set`/`--profile` flags, test instructions |
+
+### How to verify (runnable anywhere, no CloudShell)
+
+```bash
+cd sizing-scripts/launcher
+python3 test_wiz_sizing.py          # 14 tests
+python3 wiz-sizing.py --list        # manifest leaves
+python3 wiz-sizing.py --dry-run --profile azure   # preview a sweep's commands
+python3 wiz-sizing.py --dry-run --leaf aws-cloud --set=--all=on --set=--regions=us-east-1,eu-west-1
+```
+
+### Still deferred (unchanged from v1, not regressed)
+
+- **Manifest-only additions** for the out-of-scope providers (OCI, Alibaba, Linode, Snowflake,
+  vSphere, HCP Terraform) — a future data-only PR; no UI work needed.
+- **In-shell manual matrix** (§8 below): detection, live preflight/install, and a real
+  small-scope scan must still be exercised by an operator inside each live CloudShell, since
+  ambient auth and env detection can't be reproduced from outside.
 
 ---
 
