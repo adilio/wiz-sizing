@@ -36,6 +36,9 @@ SIZING_ROOT = LAUNCHER_DIR.parent                        # .../sizing-scripts
 ORIGIN_URL = "https://downloads.wiz.io/"
 REPO_HINT = "git clone https://github.com/wiz-sec/wiz-sizing.git"
 
+# Set by --dry-run: skip dependency preflight prompts and never execute.
+DRY_RUN = False
+
 # ---------------------------------------------------------------------------
 # Manifest
 # ---------------------------------------------------------------------------
@@ -65,19 +68,21 @@ SCRIPTS = [
         "pip": "boto3 botocore eks_token kubernetes urllib3",
         "options": [
             {"flag": "--all", "kind": "toggle", "advanced": False,
-             "help": "Count all supported resource types"},
+             "help": "Count resources in ALL accounts in the current AWS Organization"},
             {"flag": "--data", "kind": "toggle", "advanced": False,
-             "help": "Include data-sensitive resource counts"},
+             "help": "Include Cloud Data Security resources (buckets, databases, …)"},
             {"flag": "--images", "kind": "toggle", "advanced": False,
-             "help": "Include container image counts"},
-            {"flag": "--regions", "kind": "csv", "advanced": False,
-             "help": "Comma-separated regions to scan"},
+             "help": "Include registry container images"},
+            {"flag": "--regions", "kind": "idfile", "advanced": False,
+             "idfile": "regions.txt",
+             "help": "Limit to specific regions (comma/space list → regions.txt)"},
             {"flag": "--output-dir", "kind": "path", "advanced": False, "default": ".",
              "help": "Directory for the output CSV"},
-            {"flag": "--accounts", "kind": "csv", "advanced": True,
-             "help": "Comma-separated account IDs"},
+            {"flag": "--accounts", "kind": "idfile", "advanced": True,
+             "idfile": "accounts.txt",
+             "help": "Limit to specific account IDs (comma/space list → accounts.txt)"},
             {"flag": "--id", "kind": "str", "advanced": True,
-             "help": "Run identifier"},
+             "help": "Scan only this single account ID"},
             {"flag": "--role-name", "kind": "str", "advanced": True,
              "help": "Cross-account role name"},
             {"flag": "--gov", "kind": "toggle", "advanced": True,
@@ -111,8 +116,8 @@ SCRIPTS = [
         "options": [
             {"flag": "--defend-detailed", "kind": "toggle", "advanced": False,
              "help": "Produce a detailed per-source breakdown"},
-            {"flag": "--output-dir", "kind": "path", "advanced": False, "default": ".",
-             "help": "Directory for the output CSV"},
+            # NOTE: this script has no output flag; it writes
+            # aws-defend-log-volume.csv into the working directory.
             {"flag": "--defend-cloudtrail-logs-bucket", "kind": "str", "advanced": True},
             {"flag": "--defend-cloudtrail-logs-bucket-prefix", "kind": "str", "advanced": True},
             {"flag": "--defend-cloudtrail-logs-bucket-days", "kind": "int", "advanced": True},
@@ -141,18 +146,20 @@ SCRIPTS = [
                "azure-mgmt-subscription azure-mgmt-compute",
         "options": [
             {"flag": "--all", "kind": "toggle", "advanced": False,
-             "help": "Count all supported resource types"},
+             "help": "Count resources in ALL subscriptions in the current Management Group"},
             {"flag": "--data", "kind": "toggle", "advanced": False,
-             "help": "Include data-sensitive resource counts"},
+             "help": "Include Cloud Data Security resources (buckets, databases, …)"},
             {"flag": "--images", "kind": "toggle", "advanced": False,
-             "help": "Include container image counts"},
-            {"flag": "--subscriptions", "kind": "csv", "advanced": False,
-             "help": "Comma-separated subscription IDs"},
+             "help": "Include registry container images"},
+            {"flag": "--subscriptions", "kind": "idfile", "advanced": False,
+             "idfile": "subscriptions.txt",
+             "help": "Limit to specific subscription IDs (comma/space list → subscriptions.txt)"},
             {"flag": "--output-dir", "kind": "path", "advanced": False, "default": ".",
              "help": "Directory for the output CSV"},
             {"flag": "--graph", "kind": "toggle", "advanced": True,
              "help": "Use Resource Graph queries"},
-            {"flag": "--id", "kind": "str", "advanced": True},
+            {"flag": "--id", "kind": "str", "advanced": True,
+             "help": "Scan only this single subscription ID"},
             {"flag": "--gov", "kind": "toggle", "advanced": True},
             {"flag": "--china", "kind": "toggle", "advanced": True},
             {"flag": "--germany", "kind": "toggle", "advanced": True},
@@ -208,18 +215,21 @@ SCRIPTS = [
         "pip": "google-api-python-client google-auth",
         "options": [
             {"flag": "--all", "kind": "toggle", "advanced": False,
-             "help": "Count all supported resource types"},
+             "help": "Count resources in ALL accessible GCP projects"},
             {"flag": "--data", "kind": "toggle", "advanced": False,
-             "help": "Include data-sensitive resource counts"},
+             "help": "Include Cloud Data Security resources (buckets, databases, …)"},
             {"flag": "--images", "kind": "toggle", "advanced": False,
-             "help": "Include container image counts"},
-            {"flag": "--projects", "kind": "csv", "advanced": False,
-             "help": "Comma-separated project IDs"},
+             "help": "Include registry container images"},
+            {"flag": "--projects", "kind": "idfile", "advanced": False,
+             "idfile": "projects.txt",
+             "help": "Limit to specific project IDs (comma/space list → projects.txt)"},
             {"flag": "--output-dir", "kind": "path", "advanced": False, "default": ".",
              "help": "Directory for the output CSV"},
-            {"flag": "--id", "kind": "str", "advanced": True},
-            {"flag": "--exclude", "kind": "csv", "advanced": True,
-             "help": "Comma-separated projects to exclude"},
+            {"flag": "--id", "kind": "str", "advanced": True,
+             "help": "Scan only this single project ID"},
+            {"flag": "--exclude", "kind": "idfile", "advanced": True,
+             "idfile": "excluded-folders.txt",
+             "help": "Exclude folder IDs (comma/space list → excluded-folders.txt)"},
             {"flag": "--include-project-regex", "kind": "str", "advanced": True},
             {"flag": "--exclude-project-regex", "kind": "str", "advanced": True},
             {"flag": "--start-after-project", "kind": "str", "advanced": True},
@@ -391,14 +401,57 @@ SCRIPTS = [
         ],
         "token_args": [
             {"flag": "--org", "prompt": "Azure DevOps organization", "secret": False,
-             "env": "AZURE_DEVOPS_ORG"},
+             "env": "AZURE_DEVOPS_ORG", "detect": "ado_org"},
             {"flag": "--token", "prompt": "Azure DevOps PAT", "secret": True,
-             "env": "AZURE_DEVOPS_EXT_PAT"},
+             "env": "ADO_TOKEN"},
         ],
     },
 ]
 
 CSP_LABELS = {"aws": "AWS", "azure": "Azure", "gcp": "GCP"}
+
+# ---------------------------------------------------------------------------
+# Profiles — one-confirmation "recommended full sweep" per CSP
+# ---------------------------------------------------------------------------
+# A profile is an ordered list of steps run under a single confirmation. Each
+# step names a leaf id and the default overrides for an inclusive, org-wide
+# scan. `detect` on a step maps a DETECTORS key to the flag that should receive
+# the detected value (e.g. GCP org id -> --organization-id). After the core
+# steps, the launcher offers the opt-in leaves (M365, Azure DevOps).
+#   inclusive defaults: AWS org --all, Azure mgmt-group --all + Defend
+#   --all-subscriptions, GCP --all + Defend --org-aggregate.
+PROFILES = {
+    "aws": {
+        "label": "★ Recommended full sweep — all accounts + regions, then Defend",
+        "steps": [
+            {"leaf": "aws-cloud",
+             "values": {"--all": True, "--data": True, "--images": True}},
+            {"leaf": "aws-defend", "values": {}},
+        ],
+    },
+    "azure": {
+        "label": "★ Recommended full sweep — all subscriptions, then Defend (tenant)",
+        "confirm_detect": "azure_tenant",
+        "steps": [
+            {"leaf": "azure-cloud",
+             "values": {"--all": True, "--data": True, "--images": True}},
+            {"leaf": "azure-defend", "values": {"--all-subscriptions": True}},
+        ],
+    },
+    "gcp": {
+        "label": "★ Recommended full sweep — all projects, then Defend (org-wide)",
+        "steps": [
+            {"leaf": "gcp-cloud",
+             "values": {"--all": True, "--data": True, "--images": True}},
+            {"leaf": "gcp-defend",
+             "values": {"--org-aggregate": True},
+             "detect": {"gcp_org": "--organization-id"}},
+        ],
+    },
+}
+
+# Opt-in leaves offered after a profile's core steps complete.
+PROFILE_OPTINS = ["m365", "ado"]
 
 # ---------------------------------------------------------------------------
 # Manifest helpers
@@ -450,6 +503,77 @@ def detect_csp():
 
 
 # ---------------------------------------------------------------------------
+# Scope-identity auto-detection (best-effort; never blocks)
+# ---------------------------------------------------------------------------
+# These feed the inclusive "recommended full sweep" defaults: the org/tenant
+# scope an org-wide scan needs. Every helper shells out to the cloud's own CLI
+# (already present and authenticated in that CloudShell), times out fast, and
+# returns None on any failure so detection never blocks the menu.
+
+def _run_capture(cmd, timeout=8):
+    """Run a command, return stripped stdout or None on any failure."""
+    try:
+        res = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=timeout,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if res.returncode != 0:
+        return None
+    out = res.stdout.decode("utf-8", "replace").strip()
+    return out or None
+
+
+def detect_gcp_org():
+    """Best-effort GCP organization id (digits) for --organization-id."""
+    out = _run_capture([
+        "gcloud", "organizations", "list",
+        "--format=value(ID)", "--limit=1",
+    ])
+    if out:
+        return out.splitlines()[0].strip()
+    return None
+
+
+def detect_azure_tenant():
+    """Best-effort Azure tenant id, surfaced for confirmation on full sweeps."""
+    out = _run_capture([
+        "az", "account", "show", "--query", "tenantId", "-o", "tsv",
+    ])
+    if out:
+        return out.splitlines()[0].strip()
+    return None
+
+
+def detect_ado_org():
+    """Best-effort Azure DevOps org. Env first, then the az devops default."""
+    env_org = os.environ.get("AZURE_DEVOPS_ORG")
+    if env_org:
+        return env_org.strip()
+    out = _run_capture([
+        "az", "devops", "configure", "--list",
+    ])
+    if not out:
+        return None
+    for line in out.splitlines():
+        if line.strip().startswith("organization"):
+            _, _, val = line.partition("=")
+            val = val.strip().rstrip("/")
+            if val:
+                # normalize https://dev.azure.com/<org> -> <org>
+                return val.rsplit("/", 1)[-1] if "/" in val else val
+    return None
+
+
+DETECTORS = {
+    "gcp_org": detect_gcp_org,
+    "azure_tenant": detect_azure_tenant,
+    "ado_org": detect_ado_org,
+}
+
+
+# ---------------------------------------------------------------------------
 # Command serialization
 # ---------------------------------------------------------------------------
 
@@ -461,6 +585,44 @@ def default_value(opt):
     if opt["kind"] == "psbool":
         return None
     return ""
+
+
+def parse_id_list(raw):
+    """Split a comma/space/newline separated id list into clean tokens."""
+    if not raw:
+        return []
+    tokens = []
+    for chunk in str(raw).replace(",", " ").split():
+        chunk = chunk.strip()
+        if chunk:
+            tokens.append(chunk)
+    return tokens
+
+
+def idfile_plan(leaf, values):
+    """Return [(filename, [ids]), …] for idfile options with a value set.
+
+    The target scripts read these IDs from a sibling .txt file in their cwd and
+    are enabled by a bare toggle flag (e.g. `--regions` reads `regions.txt`).
+    """
+    plan = []
+    for opt in leaf["options"]:
+        if opt["kind"] != "idfile":
+            continue
+        ids = parse_id_list(values.get(opt["flag"], ""))
+        if ids:
+            plan.append((opt["idfile"], ids))
+    return plan
+
+
+def materialize_idfiles(leaf, values, cwd):
+    """Write the idfile .txt files into cwd. Returns the written paths."""
+    written = []
+    for filename, ids in idfile_plan(leaf, values):
+        path = Path(cwd) / filename
+        path.write_text("\n".join(ids) + "\n", encoding="utf-8")
+        written.append(str(path))
+    return written
 
 
 def build_command(leaf, values, tokens=None):
@@ -499,6 +661,10 @@ def build_command(leaf, values, tokens=None):
         kind = opt["kind"]
         if kind == "toggle":
             if val:
+                cmd.append(flag)
+        elif kind == "idfile":
+            # bare toggle; the IDs go into a sibling .txt file (see idfile_plan)
+            if parse_id_list(val):
                 cmd.append(flag)
         else:
             if val not in (None, ""):
@@ -600,6 +766,17 @@ def collect_tokens(leaf):
             if reuse in ("", "y", "yes"):
                 tokens[flag] = env_val
                 continue
+        # best-effort auto-detect a non-secret default (e.g. ADO org)
+        suggested = ""
+        if targ.get("detect") and not targ.get("secret"):
+            detector = DETECTORS.get(targ["detect"])
+            if detector:
+                suggested = detector() or ""
+        if suggested:
+            ans = input("  %s [detected: %s]: "
+                        % (targ["prompt"], suggested)).strip()
+            tokens[flag] = ans or suggested
+            continue
         prompt = "  %s: " % targ["prompt"]
         if targ.get("secret"):
             val = getpass.getpass(prompt)
@@ -631,6 +808,8 @@ def choose_cwd(leaf, values):
 def execute(leaf, cmd, values):
     cwd = choose_cwd(leaf, values)
     print("\n  Running in: %s\n" % cwd)
+    for path in materialize_idfiles(leaf, values, cwd):
+        print("  Wrote scope file: %s" % path)
     print("  " + "-" * 60)
     try:
         res = subprocess.run(cmd, cwd=cwd)
@@ -685,10 +864,14 @@ class PromptUI:
             return leaf  # leaf dict or None
 
     def _csp_menu(self, csp):
-        leaves = [l for l in SCRIPTS if l["csp"] == csp]
         print("\n=== Wiz Sizing — %s ===" % CSP_LABELS.get(csp, csp))
-        for i, leaf in enumerate(leaves, 1):
-            print("  %d) %s" % (i, leaf["label"]))
+        rows = []
+        if csp in PROFILES:
+            rows.append("PROFILE")
+            print("  %d) %s" % (len(rows), PROFILES[csp]["label"]))
+        for leaf in [l for l in SCRIPTS if l["csp"] == csp]:
+            rows.append(leaf)
+            print("  %d) %s" % (len(rows), leaf["label"]))
         print("  s) Switch provider / category")
         print("  q) Quit")
         raw = input("Select: ").strip().lower()
@@ -696,8 +879,8 @@ class PromptUI:
             return None
         if raw == "s":
             return "SWITCH"
-        if raw.isdigit() and 1 <= int(raw) <= len(leaves):
-            return leaves[int(raw) - 1]
+        if raw.isdigit() and 1 <= int(raw) <= len(rows):
+            return rows[int(raw) - 1]
         return self._csp_menu(csp)
 
     def _full_menu(self):
@@ -871,7 +1054,10 @@ class CursesUI:
     def pick_leaf(self, csp):
         while True:
             if csp:
-                rows = [(l["label"], l) for l in SCRIPTS if l["csp"] == csp]
+                rows = []
+                if csp in PROFILES:
+                    rows.append((PROFILES[csp]["label"], "PROFILE"))
+                rows += [(l["label"], l) for l in SCRIPTS if l["csp"] == csp]
                 rows.append(("» Switch provider / category", "SWITCH"))
                 title = "Wiz Sizing — %s" % CSP_LABELS.get(csp, csp)
                 footer = "↑/↓ move · Enter select · q quit"
@@ -1019,6 +1205,120 @@ class CursesUI:
 
 
 # ===========================================================================
+# Profile runner (recommended full sweep)
+# ===========================================================================
+
+def _resolve_profile_steps(profile):
+    """Apply detection and (when detection fails) prompt for required ids.
+
+    Returns a list of (leaf, values). Steps whose required detected id could
+    not be resolved are dropped with a printed note.
+    """
+    steps = []
+    for step in profile["steps"]:
+        leaf = leaf_by_id(step["leaf"])
+        if leaf is None:
+            continue
+        values = dict(step.get("values", {}))
+        skip = False
+        for det_key, flag in step.get("detect", {}).items():
+            detector = DETECTORS.get(det_key)
+            detected = detector() if detector else None
+            if not detected:
+                detected = input(
+                    "  Could not auto-detect %s for %s.\n"
+                    "  Enter %s value (blank to skip this step): "
+                    % (det_key.replace("_", " "), leaf["label"], flag)).strip()
+            if detected:
+                values[flag] = detected
+            else:
+                print("  Skipping %s — no %s available." % (leaf["label"], flag))
+                skip = True
+        if not skip:
+            steps.append((leaf, values))
+    return steps
+
+
+def _run_leaf_inline(leaf, values, tokens=None):
+    """Preflight (unless dry-run), build, and execute one leaf. Plain text."""
+    if not script_exists(leaf):
+        print("  Script not found: %s — skipping." % resolve_script_path(leaf))
+        return
+    if not DRY_RUN and not preflight(leaf):
+        print("  Skipping %s — dependency not satisfied." % leaf["label"])
+        return
+    cmd = build_command(leaf, values, tokens)
+    execute(leaf, cmd, values)
+
+
+def _offer_profile_optins():
+    """Offer the opt-in leaves (M365, ADO) after the core sweep. Plain text."""
+    text = PromptUI()
+    for leaf_id in PROFILE_OPTINS:
+        leaf = leaf_by_id(leaf_id)
+        if leaf is None:
+            continue
+        ans = input("\n  Also size %s? [y/N]: " % leaf["label"]).strip().lower()
+        if ans not in ("y", "yes"):
+            continue
+        values = text.collect_options(leaf)
+        if values is None:
+            continue
+        tokens = collect_tokens(leaf)
+        if tokens is None:
+            continue
+        _run_leaf_inline(leaf, values, tokens)
+
+
+def run_profile(frontend, csp):
+    """Run a CSP's recommended full sweep under a single confirmation."""
+    profile = PROFILES.get(csp)
+    if not profile:
+        return
+    with frontend.suspend():
+        print("\n" + "=" * 64)
+        print("  %s" % profile["label"])
+        print("=" * 64)
+        print("  %s" % auth_banner(leaf_by_id(profile["steps"][0]["leaf"])))
+
+        if profile.get("confirm_detect"):
+            detector = DETECTORS.get(profile["confirm_detect"])
+            ident = detector() if detector else None
+            name = profile["confirm_detect"].replace("_", " ")
+            if ident:
+                print("  Detected %s: %s" % (name, ident))
+            else:
+                print("  Could not auto-detect %s; the scripts will use ambient scope."
+                      % name)
+
+        steps = _resolve_profile_steps(profile)
+        if not steps:
+            print("\n  No runnable steps. Returning to menu.")
+            input("  Press Enter to continue... ")
+            return
+
+        print("\n  This will run %d step(s) in order:" % len(steps))
+        for i, (leaf, values) in enumerate(steps, 1):
+            cmd = build_command(leaf, values)
+            print("\n   %d) %s" % (i, leaf["label"]))
+            print("      %s" % quote_command(cmd))
+            for filename, ids in idfile_plan(leaf, values):
+                print("      (writes %s: %s)" % (filename, ", ".join(ids)))
+
+        ans = input("\n  Run all of the above now? [y/N]: ").strip().lower()
+        if ans not in ("y", "yes"):
+            print("  Cancelled.")
+            return
+
+        for i, (leaf, values) in enumerate(steps, 1):
+            print("\n  --- Step %d/%d: %s ---" % (i, len(steps), leaf["label"]))
+            _run_leaf_inline(leaf, values)
+
+        _offer_profile_optins()
+        input("\n  Sweep complete. Press Enter to return to the menu... ")
+
+
+# ===========================================================================
 # Session driver (shared by both frontends)
 # ===========================================================================
 
@@ -1027,6 +1327,9 @@ def run_session(frontend, csp):
         leaf = frontend.pick_leaf(csp)
         if leaf is None:
             return
+        if leaf == "PROFILE":
+            run_profile(frontend, csp)
+            continue
 
         if not script_exists(leaf):
             with frontend.suspend():
@@ -1071,13 +1374,55 @@ def cmd_list():
               % (leaf["id"], leaf["label"], leaf["script"], mark))
 
 
-def cmd_dry_run_leaf(leaf_id):
+def _parse_set_values(leaf, set_args):
+    """Turn ['--flag=value', '--toggle=on'] into a values dict for a leaf."""
+    kinds = {o["flag"]: o["kind"] for o in leaf["options"]}
+    values = {}
+    for raw in set_args or []:
+        flag, sep, val = raw.partition("=")
+        if not sep:
+            flag, val = raw, "on"  # bare flag => toggle on
+        kind = kinds.get(flag)
+        if kind in ("toggle", "psbool"):
+            values[flag] = val.strip().lower() in ("on", "y", "yes", "true", "1")
+        else:
+            values[flag] = val
+    return values
+
+
+def cmd_dry_run_leaf(leaf_id, set_args=None):
     leaf = leaf_by_id(leaf_id)
     if leaf is None:
         print("Unknown leaf id: %s" % leaf_id, file=sys.stderr)
         return 2
-    cmd = build_command(leaf, {})
+    values = _parse_set_values(leaf, set_args)
+    cmd = build_command(leaf, values)
     print(quote_command(cmd))
+    for filename, ids in idfile_plan(leaf, values):
+        print("# writes %s: %s" % (filename, ", ".join(ids)))
+    return 0
+
+
+def cmd_dry_run_profile(csp):
+    """Print a profile's steps (best-effort detection, no prompts)."""
+    profile = PROFILES.get(csp)
+    if not profile:
+        print("No profile for csp: %s" % csp, file=sys.stderr)
+        return 2
+    print("# profile: %s" % profile["label"])
+    for step in profile["steps"]:
+        leaf = leaf_by_id(step["leaf"])
+        values = dict(step.get("values", {}))
+        for det_key, flag in step.get("detect", {}).items():
+            detector = DETECTORS.get(det_key)
+            detected = detector() if detector else None
+            values[flag] = detected or "<%s>" % det_key
+        print(quote_command(build_command(leaf, values)))
+        for filename, ids in idfile_plan(leaf, values):
+            print("# writes %s: %s" % (filename, ", ".join(ids)))
+    print("# opt-ins offered after: %s"
+          % ", ".join(leaf_by_id(i)["label"] for i in PROFILE_OPTINS
+                      if leaf_by_id(i)))
     return 0
 
 
@@ -1097,16 +1442,24 @@ def main(argv=None):
     parser.add_argument("--no-curses", action="store_true",
                         help="Force the numbered-prompt fallback UI.")
     parser.add_argument("--leaf", metavar="ID",
-                        help="With --dry-run: print one leaf's default command.")
+                        help="With --dry-run: print one leaf's command.")
+    parser.add_argument("--set", metavar="FLAG=VALUE", action="append",
+                        help="With --leaf: override an option, e.g. --set=--all=on "
+                             "(use the attached = form; repeatable).")
+    parser.add_argument("--profile", choices=["aws", "azure", "gcp"],
+                        help="With --dry-run: print a CSP profile's steps.")
     args = parser.parse_args(argv)
 
     if args.list:
         cmd_list()
         return 0
 
+    if args.profile:
+        return cmd_dry_run_profile(args.profile)
+
     if args.leaf:
-        # default-command dump, honoring --dry-run as the print-only mode
-        return cmd_dry_run_leaf(args.leaf)
+        # command dump, honoring --dry-run as the print-only mode
+        return cmd_dry_run_leaf(args.leaf, args.set)
 
     csp = args.csp or detect_csp()
 
@@ -1138,12 +1491,17 @@ def main(argv=None):
 
 def _install_dry_run():
     """Replace execute() with a print-only version for --dry-run sessions."""
-    global execute
+    global execute, DRY_RUN
+    DRY_RUN = True
 
     def _dry_execute(leaf, cmd, values):
+        cwd = choose_cwd(leaf, values)
         print("\n  [dry-run] Would run:")
         print("    " + quote_command(cmd))
-        print("  [dry-run] In: %s" % choose_cwd(leaf, values))
+        print("  [dry-run] In: %s" % cwd)
+        for filename, ids in idfile_plan(leaf, values):
+            print("  [dry-run] Would write %s: %s"
+                  % (str(Path(cwd) / filename), ", ".join(ids)))
         return 0
 
     execute = _dry_execute

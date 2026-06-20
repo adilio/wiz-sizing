@@ -19,10 +19,22 @@ manifest embedded in `wiz-sizing.py`, so adding a script is a data edit.
 
 ## Quick start
 
-Get the repo into your CloudShell, then:
+### One-line bootstrap (single file, nothing to clone)
+
+`wiz-sizing.py` is a single self-contained file. In any CloudShell you can pull
+just the launcher and run it:
 
 ```bash
-cd sizing-scripts/launcher
+curl -fsSL https://downloads.wiz.io/sizing/wiz-sizing.py -o wiz-sizing.py && python3 wiz-sizing.py
+```
+
+When run on its own, the launcher still finds the sizing scripts if they sit in a
+sibling `sizing-scripts/` tree; otherwise it prints where to get them. To run the
+full menu you need the repo present:
+
+```bash
+git clone https://github.com/wiz-sec/wiz-sizing.git
+cd wiz-sizing/sizing-scripts/launcher
 python3 wiz-sizing.py
 ```
 
@@ -36,14 +48,43 @@ item that opens the full menu. Per-CSP shims are provided too:
 ./launch-gcp.sh      # --csp gcp
 ```
 
+## Recommended full sweep (one confirmation)
+
+Each provider's submenu starts with **★ Recommended full sweep** — an inclusive,
+org-wide profile that runs under a single confirmation:
+
+| CSP | What it runs |
+|-----|--------------|
+| AWS | Cloud resource count `--all --data --images` (all accounts in the Organization), then Defend log volume |
+| Azure | Cloud resource count `--all --data --images` (all subscriptions in the Management Group), then Defend `--all-subscriptions` (tenant-wide) |
+| GCP | Cloud resource count `--all --data --images` (all projects), then Defend `--org-aggregate` (org-wide) |
+
+After the core steps it offers the opt-ins **Microsoft 365** and **Azure DevOps**.
+Where an org-wide scan needs a scope identity, the launcher auto-detects it
+best-effort (GCP organization id via `gcloud`, Azure tenant via `az`) and asks you
+to confirm; detection never blocks — if it fails you are prompted for the value.
+
+## Scoping a scan (regions / accounts / subscriptions / projects)
+
+The cloud scripts read scope IDs from a sibling text file (`regions.txt`,
+`accounts.txt`, `subscriptions.txt`, `projects.txt`, `excluded-folders.txt`) and
+are enabled by a bare flag. The launcher handles this for you: type a
+comma/space-separated list into e.g. `--regions`, and it writes the `.txt` file
+into the run directory and passes the bare `--regions` flag. To scan a single
+target instead, use `--id`.
+
 ## Credentials
 
 - **Cloud and Defend scripts** use the CloudShell's existing credentials
   (ambient auth) — no token is requested.
 - **Code scripts** (GitHub / GitLab / Azure DevOps) prompt for a token. Tokens are
-  read masked via `getpass`, never echoed and never written to disk. If a known
-  environment variable is already set (`GITHUB_TOKEN`, `GITLAB_TOKEN`,
-  `AZURE_DEVOPS_EXT_PAT`), the launcher offers to reuse it.
+  read masked via `getpass`, never echoed and never written to disk.
+  - **Azure DevOps** reads `ADO_TOKEN` natively; the launcher offers to reuse it
+    if set. The `--org` is auto-detected best-effort (from `AZURE_DEVOPS_ORG`, then
+    `az devops configure`) and you confirm it.
+  - `GITHUB_TOKEN` and `GITLAB_TOKEN` are **launcher conventions** — the GitHub and
+    GitLab scripts do not read them themselves; the launcher simply reuses them to
+    fill `--token` if they happen to be set.
 - **Microsoft 365** runs through `pwsh` (present in Azure Cloud Shell, not in
   AWS/GCP CloudShell) and authenticates with a device-code flow. The M365 leaf is
   blocked where `pwsh` is absent.
@@ -64,14 +105,22 @@ Azure/GCP Defend scripts) and then re-probes.
 | `--dry-run` | Build and print the exact command, but never execute it. |
 | `--list` | Print the manifest leaves (id, label, script path) and exit. |
 | `--no-curses` | Force the numbered-prompt fallback UI. |
-| `--leaf ID` | Print one leaf's default command (combine with `--dry-run` for testing). |
+| `--leaf ID` | Print one leaf's command (combine with `--dry-run` for testing). |
+| `--set=--flag=value` | With `--leaf`: override an option (repeatable; use the attached `=` form, e.g. `--set=--all=on`). |
+| `--profile aws\|azure\|gcp` | With `--dry-run`: print a recommended-sweep profile's steps. |
 
 The printed command uses `shlex.quote` (or PowerShell-style quoting for M365) so it
 is copy-pasteable and auditable.
 
 ## Manual validation matrix (run in each real CloudShell)
 
-`--dry-run` and `--list` are runnable anywhere and assert the menu/command wiring.
+`--dry-run`, `--list`, `--profile`, and the unit tests are runnable anywhere and
+assert the menu/command wiring (including non-default scope combinations):
+
+```bash
+python3 test_wiz_sizing.py
+```
+
 The following must be confirmed inside each live CloudShell, since environment
 detection and ambient auth can't be exercised from outside:
 

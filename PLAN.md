@@ -1,3 +1,124 @@
+# Wiz Sizing TUI Launcher — v2 Plan (active)
+
+> **Status (2026-06-20): v2 IMPLEMENTED (pending commit).** All six prioritized items in §C
+> are built in `sizing-scripts/launcher/wiz-sizing.py` and verified: the B1 scope-flag bug is
+> fixed (idfile kind writes `.txt` + bare toggle), ADO now uses `ADO_TOKEN` with org
+> auto-detect, per-CSP "recommended full sweep" profiles run under one confirmation with
+> opt-ins, scope-identity detection (GCP org / Azure tenant / ADO org) is best-effort, the
+> README has a `curl | python3` bootstrap, and a `test_wiz_sizing.py` suite (13 tests, all
+> passing) asserts non-default argv. **Sections 1–10 below are DEPRECATED** — kept for history
+> only; do not implement against them. See [§D](#d-deprecated-v1-spec-below).
+
+## A. Goal (restated)
+
+Exceptional CloudShell UX with **absolutely minimal dependencies** (pure stdlib, no
+`pip install` for the launcher itself), runnable in **AWS / Azure / GCP CloudShell**, that
+**auto-detects as much as possible** and offers **logical groupings with sane, inclusive
+defaults**. The headline default per CSP should be a one-confirmation "recommended full sweep"
+— e.g. Azure default = scan **all** Azure Cloud resources **and** Azure Defend ingestion across
+the tenant, with **opt-in** Microsoft 365 and Azure DevOps, auto-detecting tenant level, M365
+tenant, and the Azure DevOps root org.
+
+## B. Evaluation findings (what's wrong with v1 today)
+
+### B1. Correctness bug — scope flags don't match the scripts (highest priority)
+
+The v1 manifest models `--regions`, `--accounts`, `--subscriptions`, `--projects`, and
+`--exclude` as `kind: "csv"` taking a comma-separated value. In the **actual scripts** all five
+are `action="store_true"` toggles that read IDs from a **sibling `.txt` file**:
+
+| Manifest says (v1) | Script actually does | File read |
+|---|---|---|
+| `--regions us-east-1,us-west-2` | `--regions` (no value) | `regions.txt` |
+| `--accounts 111,222` | `--accounts` (no value) | `accounts.txt` |
+| `--subscriptions <ids>` | `--subscriptions` (no value) | `subscriptions.txt` |
+| `--projects <ids>` | `--projects` (no value) | `projects.txt` |
+| `--exclude <ids>` | `--exclude` (no value) | `excluded-folders.txt` |
+
+Consequence: if a user types a list into the menu, `build_command` emits e.g.
+`python3 … --regions us-east-1,us-west-2`, which argparse rejects (`--regions` accepts no
+argument). **The most common scoping action through the menu is broken.** It slipped through
+because `--dry-run --leaf` only serializes *default (empty)* values, so the csv flags are never
+exercised. The correct single-target flag in every cloud script is **`--id`** (currently buried
+as advanced `str`). Fix: write the `.txt` file from the launcher when a list is entered and pass
+the bare toggle; route single-target to `--id`.
+
+### B2. Token env-var mismatches
+
+- **ADO**: manifest reuses `AZURE_DEVOPS_EXT_PAT`, but the script's own env var is **`ADO_TOKEN`**
+  (`active-developer-count-ado.py:59`). The reuse prompt never fires for the variable the script
+  honors. Also `--org` is `required` with **no env fallback**.
+- `GITHUB_TOKEN` / `GITLAB_TOKEN` have **no script-side default** — they are launcher-only
+  conventions; document them as such rather than implying the scripts read them.
+
+### B3. Structural gap — no "recommended profile" concept
+
+The session driver runs exactly **one leaf**. The inclusive Azure example (Cloud `--all` +
+Defend `--all-subscriptions`, opt-in M365 + AzDO) cannot be expressed. Also every toggle
+defaults **off**, so the "easy path" today scans nothing org-wide.
+
+### B4. Scope auto-detection is provider-only
+
+`detect_csp()` identifies *which cloud* but never the *scope identity* needed for inclusive
+defaults:
+- GCP Defend `--org-aggregate` requires `--organization-id` — nothing derives it.
+- Azure "all" is management-group-wide; tenant is neither surfaced nor confirmed.
+- ADO has no root-org detection; `--org` is required with no fallback.
+These are exactly the "auto-detect Azure tenant level, M365 tenant, ADO root org" pieces.
+
+### B5. No one-line bootstrap
+
+README says "get the repo into your CloudShell" and leaves it to the user. Since the launcher is
+a single self-contained file, a `curl …/wiz-sizing.py -o wiz-sizing.py && python3 wiz-sizing.py`
+bootstrap is achievable and is the biggest perceived-UX win.
+
+### B6. Test blind spot
+
+`--dry-run --leaf` only builds default commands, so a regression like B1 passes. Tests must
+cover representative **non-default** option combinations.
+
+## C. v2 plan (prioritized)
+
+1. [x] **[correctness] Fix scope-flag handling.** Replaced `csv` semantics for `--regions`,
+   `--accounts`, `--subscriptions`, `--projects`, `--exclude` with: (a) `--id` for a single
+   target, (b) a new data-driven `idfile` kind — a list input writes the script's expected
+   `.txt` file into the run cwd (verified the scripts `open()` these from cwd, not output-dir)
+   and passes the bare toggle. Also corrected the wrong `--all` help text (it is org/mgmt-group
+   /project-wide, not "all resource types").
+2. [x] **[correctness] Fix ADO env var** to `ADO_TOKEN`; added an `--org` env/auto-detect
+   fallback (`detect: ado_org`); README now flags GitHub/GitLab token vars as launcher
+   conventions (the scripts don't read them).
+3. [x] **[UX] Per-CSP "Recommended full sweep" profile.** `PROFILES` + `PROFILE_OPTINS` drive
+   an ordered sequence under one confirmation, then offer the opt-ins (M365, AzDO). Inclusive
+   defaults: AWS org `--all`, Azure mgmt-group `--all` + Defend `--all-subscriptions`, GCP
+   `--all` + Defend `--org-aggregate`. Wired into both the curses and prompt menus as the top
+   per-CSP item.
+4. [x] **[auto-detect] Scope identity detection** (`DETECTORS`): GCP org id (`gcloud`), Azure
+   tenant (`az`), ADO org (env then `az devops configure`). Best-effort with fast timeout,
+   confirmation, and a prompt fallback; never blocks if detection fails.
+5. [x] **[UX] `curl | python3` bootstrap one-liner** added to the README per CloudShell.
+6. [x] **[tests] Extended dry-run/testability**: `--set=--flag=value` injects non-defaults into
+   `--leaf`, `--profile` dumps a profile's steps, and `test_wiz_sizing.py` (13 tests) asserts
+   argv for non-default combinations incl. the B1 regression.
+
+**Additional finding fixed during implementation (B1-class):** the v1 manifest listed
+`--output-dir` for the **AWS Defend** leaf, but that script has *no* output flag — it writes
+`aws-defend-log-volume.csv` into the working directory. Passing `--output-dir` would make
+argparse reject the command (and it was in the recommended profile). Removed from the manifest;
+guarded by a test. (Azure/GCP Defend correctly use `--output-filename`, a bare filename written
+to cwd.)
+
+Constraints unchanged from v1: pure stdlib, never import a cloud SDK, never edit the target
+scripts, manifest-driven menu.
+
+---
+
+## D. DEPRECATED v1 spec (below)
+
+> **⚠️ DEPRECATED — historical only.** The sections below describe the v1 design as shipped in
+> `27324c2`. They contain the known-wrong `csv` scope-flag modeling (see §B1) and predate the
+> v2 goals. Retained for context; supersede with §A–§C above.
+
 # Wiz Sizing TUI Launcher — Full Design & Implementation Spec
 
 > **Status (2026-06-20): v1 COMPLETE.** All in-scope work is built, committed to `main`
