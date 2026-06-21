@@ -10,7 +10,7 @@ Bundles the Azure sizing modes into one file you can drop into Azure Cloud Shell
 It also drives Microsoft 365 sizing (wiz-365.ps1) from its profiles.
 
 One-line bootstrap (Azure Cloud Shell):
-  curl -fsSL https://downloads.wiz.io/sizing/wiz-azure.py -o wiz-azure.py && python3 wiz-azure.py
+  curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-azure.py -o wiz-azure.py && python3 wiz-azure.py
 
 Run with no arguments for the interactive menu, or:
   python3 wiz-azure.py --list
@@ -23,10 +23,10 @@ verbatim and run in-process, so the CSV output is byte-identical to those.
 
 FILE_TITLE = "Wiz Sizing — Azure"
 FILE_BASENAME = "wiz-azure.py"
-ONELINER = ("curl -fsSL https://downloads.wiz.io/sizing/wiz-azure.py "
+ONELINER = ("curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-azure.py "
             "-o wiz-azure.py && python3 wiz-azure.py")
 
-M365_ONELINER = ("curl -fsSL https://downloads.wiz.io/sizing/wiz-365.ps1 "
+M365_ONELINER = ("curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-365.ps1 "
                  "-o wiz-365.ps1 && pwsh ./wiz-365.ps1")
 
 MODES = [

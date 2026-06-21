@@ -7,7 +7,7 @@ Bundles the GCP sizing modes into one file you can drop into GCP Cloud Shell:
   * GCP Defend   — log-volume estimation
 
 One-line bootstrap (GCP Cloud Shell):
-  curl -fsSL https://downloads.wiz.io/sizing/wiz-gcp.py -o wiz-gcp.py && python3 wiz-gcp.py
+  curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-gcp.py -o wiz-gcp.py && python3 wiz-gcp.py
 
 Run with no arguments for the interactive menu, or:
   python3 wiz-gcp.py --list
@@ -20,7 +20,7 @@ verbatim and run in-process, so the CSV output is byte-identical to those.
 
 FILE_TITLE = "Wiz Sizing — GCP"
 FILE_BASENAME = "wiz-gcp.py"
-ONELINER = ("curl -fsSL https://downloads.wiz.io/sizing/wiz-gcp.py "
+ONELINER = ("curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-gcp.py "
             "-o wiz-gcp.py && python3 wiz-gcp.py")
 
 MODES = [

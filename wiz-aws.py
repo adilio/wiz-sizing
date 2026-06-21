@@ -7,7 +7,7 @@ Bundles the AWS sizing modes into one file you can drop into AWS CloudShell:
   * AWS Defend   — log-volume estimation
 
 One-line bootstrap (AWS CloudShell):
-  curl -fsSL https://downloads.wiz.io/sizing/wiz-aws.py -o wiz-aws.py && python3 wiz-aws.py
+  curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-aws.py -o wiz-aws.py && python3 wiz-aws.py
 
 Run with no arguments for the interactive menu, or:
   python3 wiz-aws.py --list
@@ -20,7 +20,7 @@ verbatim and run in-process, so the CSV output is byte-identical to those.
 
 FILE_TITLE = "Wiz Sizing — AWS"
 FILE_BASENAME = "wiz-aws.py"
-ONELINER = ("curl -fsSL https://downloads.wiz.io/sizing/wiz-aws.py "
+ONELINER = ("curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-aws.py "
             "-o wiz-aws.py && python3 wiz-aws.py")
 
 MODES = [

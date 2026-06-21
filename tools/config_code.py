@@ -8,7 +8,7 @@ anywhere (each prompts for a token):
   * GitLab   — active developer count
 
 One-line bootstrap (run anywhere):
-  curl -fsSL https://downloads.wiz.io/sizing/wiz-code.py -o wiz-code.py && python3 wiz-code.py
+  curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-code.py -o wiz-code.py && python3 wiz-code.py
 
 Run with no arguments for the interactive menu, or:
   python3 wiz-code.py --list
@@ -20,7 +20,7 @@ and run in-process, so the CSV output is byte-identical to those.
 
 FILE_TITLE = "Wiz Sizing — Code (GitHub / GitLab)"
 FILE_BASENAME = "wiz-code.py"
-ONELINER = ("curl -fsSL https://downloads.wiz.io/sizing/wiz-code.py "
+ONELINER = ("curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-code.py "
             "-o wiz-code.py && python3 wiz-code.py")
 
 MODES = [

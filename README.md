@@ -16,19 +16,19 @@ build, no tree to navigate: what's in the repo is exactly what you run.
 
 ```bash
 # Azure Cloud Shell
-curl -fsSL https://downloads.wiz.io/sizing/wiz-azure.py -o wiz-azure.py && python3 wiz-azure.py
+curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-azure.py -o wiz-azure.py && python3 wiz-azure.py
 
 # AWS CloudShell
-curl -fsSL https://downloads.wiz.io/sizing/wiz-aws.py   -o wiz-aws.py   && python3 wiz-aws.py
+curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-aws.py   -o wiz-aws.py   && python3 wiz-aws.py
 
 # GCP Cloud Shell
-curl -fsSL https://downloads.wiz.io/sizing/wiz-gcp.py   -o wiz-gcp.py   && python3 wiz-gcp.py
+curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-gcp.py   -o wiz-gcp.py   && python3 wiz-gcp.py
 
 # GitHub / GitLab (run anywhere; prompts for a token)
-curl -fsSL https://downloads.wiz.io/sizing/wiz-code.py  -o wiz-code.py  && python3 wiz-code.py
+curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-code.py  -o wiz-code.py  && python3 wiz-code.py
 
 # Microsoft 365 (Azure Cloud Shell / pwsh)
-curl -fsSL https://downloads.wiz.io/sizing/wiz-365.ps1  -o wiz-365.ps1  && pwsh ./wiz-365.ps1
+curl -fsSL https://raw.githubusercontent.com/adilio/wiz-sizing/main/wiz-365.ps1  -o wiz-365.ps1  && pwsh ./wiz-365.ps1
 ```
 
 The Python files have **no dependencies of their own** — the menu, dependency
