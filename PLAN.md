@@ -205,18 +205,31 @@ wiz-azure.py
 Rationale: build one file end-to-end (Azure) so the scaffolding and the CSV-equivalence harness
 are proven before replicating; then each subsequent cloud is a small, mechanical lift.
 
-## 9. Testing
+## 9. Testing & the CSV-equivalence gate (concrete)
 
-- **CSV-equivalence (the gate).** For each mode, diff the new `wiz-*.py` output against the
-  legacy script on identical inputs where runnable; otherwise assert against fixtures built from
-  the exact §3 headers. A mode isn't done until this passes.
-- **Unit (runnable anywhere):** menu/argv building, `idfile` → `.txt` handling, profiles,
-  `--set`/`--dry-run`/`--mode`, scope-detection wiring (mock the CLIs), and the `output` writer's
-  filenames/headers. Port the relevant assertions from the existing `test_wiz_sizing.py` (14
-  tests) into per-file tests.
-- **In-shell manual matrix (operator-run):** in each real CloudShell — curl the file, run a
-  recommended sweep at small scope, confirm the output filename/columns match §3, confirm
-  on-demand dependency install works.
+The Azure/AWS/GCP scans **cannot run locally** (they need live, authenticated CloudShell), so
+"diff against the legacy script" is not generally available off-box. The gate is therefore
+defined structurally, in four layers — a mode is **done** only when 1–3 pass and 4 is scheduled:
+
+1. **Single writer reproduces the legacy `writerow` calls.** Every CSV write in every mode goes
+   through the shared `output` writer (§5.2). For each mode, the writer's header tuple and each
+   row tuple must be **identical** to the legacy script's `csv_writer.writerow([...])` calls —
+   same column order, same f-string formatting (e.g. GCP/Azure Defend `f"{volume_gb:.2f}"`, the
+   `(Last {N} Days)` header). Cite the legacy source line (see Appendix A) next to each writer
+   path so a reviewer can compare side by side.
+2. **Unit tests on the writer** (`tests/test_output_contract.py`): assert exact default
+   **filenames** and **header rows** for all nine modes from in-memory fixture rows (no creds
+   needed). This is the enforceable form of §3.
+3. **Scaffolding unit tests** (per file): menu/argv building, `idfile` → `.txt` materialization,
+   `--mode`/`--set`/`--dry-run`/`--profile`, token reuse + scope-detection wiring (mock the
+   `gcloud`/`az` calls). Port the relevant assertions from today's `test_wiz_sizing.py` (14
+   tests). Where a mode *can* run off-box (GitHub/GitLab with a real token), add a genuine
+   new-vs-legacy CSV diff.
+4. **In-shell manual matrix (operator-run, recorded in README):** in each real CloudShell — curl
+   the file, run a recommended sweep at small scope, byte-diff the produced CSV against the
+   legacy script's CSV for the same scope, confirm on-demand dependency install works. This is
+   the only place full new-vs-legacy diffing happens for the cloud modes; it is a release step,
+   not a blocker for landing the code.
 
 ## 10. Risks & mitigations
 
@@ -236,3 +249,123 @@ are proven before replicating; then each subsequent cloud is a small, mechanical
 - Amalgamation build (§4B), PyPI packaging, console-scripts — only if needed later.
 - Deep de-duplication of cloud API code beyond the shared scaffolding — follow-up after
   CSV-equivalence is locked.
+
+---
+
+## Appendix A — Lift-source map (copy from here; do not reinvent)
+
+All paths relative to repo root. **Read the source before lifting**; the v1 manifest had
+flag-modeling bugs, so re-verify each flag against the script's actual `argparse` block.
+
+**Shared scaffolding** ← `sizing-scripts/launcher/wiz-sizing.py` (lift these functions/classes):
+- Menu + flow: `PromptUI`, `run_session`, `main`, arg parsing (`--list/--dry-run/--set`).
+- Command building: `build_command`, `default_value`, `quote_command`, `_parse_set_values`.
+- Scope idfiles: `parse_id_list`, `idfile_plan`, `materialize_idfiles` (+ the `idfile` option
+  kind). Files: `accounts.txt`, `regions.txt`, `subscriptions.txt`, `projects.txt`,
+  `excluded-folders.txt` — opened from **cwd** by the scripts, so write them into the run cwd.
+- Dependency preflight: `probe_ok`, `preflight`.
+- Tokens: `collect_tokens` (masked, env reuse, `detect` hook).
+- Scope detection: `DETECTORS` = `detect_gcp_org` (`gcloud organizations list`),
+  `detect_azure_tenant` (`az account show`), `detect_ado_org` (`az devops configure`).
+  **Drop `detect_csp`** — each file is single-cloud.
+- Profiles: `PROFILES`, `PROFILE_OPTINS`, `run_profile`, `_resolve_profile_steps`,
+  `_offer_profile_optins`, `_run_leaf_inline`. (Generalize `PROFILES` to a *list* per file.)
+- Tests: `sizing-scripts/launcher/test_wiz_sizing.py` → split into per-file tests.
+
+**Per-mode scanning logic** ← the legacy scripts (lift the scan + the `csv_writer.writerow`
+sites named for §9 layer 1):
+
+| Mode id | Legacy source | Output writer site (legacy line) |
+|---|---|---|
+| `azure-cloud`  | `cloud/azure/resource-count-azure-v2.py` | header ~1134 / detailed ~1140 |
+| `azure-defend` | `defend/azure/log-volume-estimation-azure.py` | header ~633 |
+| `azure-devops` | `code/azure-devops/active-developer-count-ado.py` | header ~718 |
+| `aws-cloud`    | `cloud/aws/resource-count-aws-v2.py` | header ~1357 / detailed ~1363 |
+| `aws-defend`   | `defend/aws/log-volume-estimation-aws.py` | header ~834 |
+| `gcp-cloud`    | `cloud/gcp/resource-count-gcp-v2.py` | header ~1092 / detailed ~1098 |
+| `gcp-defend`   | `defend/gcp/log-volume-estimation-gcp.py` | header ~617 |
+| `github`       | `code/github/active-developer-count-github.py` | header ~468 |
+| `gitlab`       | `code/gitlab/active-developer-count-gitlab.py` | header ~497 |
+| `m365`         | `saas/microsoft-365/365_Sizing_Script.ps1` | (PowerShell, moved verbatim) |
+
+## Appendix B — Input/flag surface per mode (preserve; re-verify against argparse)
+
+`idfile` = list input → sibling `.txt` + bare toggle. Cloud/Defend = ambient auth.
+
+- **azure-cloud** — Common: `--all` (all subs in mgmt group), `--data`, `--images`,
+  `--subscriptions` (idfile→`subscriptions.txt`), `--output-dir`. Advanced: `--graph`, `--id`
+  (single sub), `--gov`, `--china`, `--germany`, `--include-subscription-regex`,
+  `--exclude-subscription-regex`, `--start-after-subscription`, `--max-subscriptions`,
+  `--max-workers`, `--max-run-minutes`, `--max-image-tags`, `--request-timeout`,
+  `--checkpoint-interval`, `--verbose`, `--debug`.
+- **azure-defend** — Common: `--subscription-id` (str) | `--all-subscriptions` (toggle),
+  `--log-analysis-days` (int), `--output-filename`. Advanced: `--errors-log-filename`,
+  `--verbose`, `--debug`.
+- **azure-devops** — Required: `--org`/`--organization` (auto-detect `ado_org`), `--token`
+  (env `ADO_TOKEN`). Common: `--proj`, `--repo`, `--days`, `--output-dir`. Advanced:
+  `--mask-emails`, `--include-disabled`, `--include-empty-repositories`, `--project-page-size`,
+  `--commit-page-size`, `--max-repositories`, `--max-commits-per-repo`, `--max-retries`,
+  `--retry-delay`, `--max-run-minutes`, `--checkpoint-interval`, `--progress-interval`,
+  `--fail-fast`, `--verbose`.
+- **aws-cloud** — Common: `--all` (all accounts in org), `--data`, `--images`, `--regions`
+  (idfile→`regions.txt`), `--output-dir`. Advanced: `--accounts` (idfile→`accounts.txt`),
+  `--id` (single account), `--role-name`, `--gov`, `--china`, `--include-account-regex`,
+  `--exclude-account-regex`, `--start-after-account`, `--max-accounts`, `--max-workers`,
+  `--max-run-minutes`, `--max-image-tags`, `--max-lambda-versions`, `--checkpoint-interval`,
+  `--verbose`, `--debug`.
+- **aws-defend** — Common: `--defend-detailed`. **No `--output-dir`** (writes
+  `aws-defend-log-volume.csv` to cwd). Advanced: `--defend-cloudtrail-logs-bucket`,
+  `--defend-cloudtrail-logs-bucket-prefix`, `--defend-cloudtrail-logs-bucket-days`,
+  `--defend-cloudtrail-logs-bucket-sample-size`, `--defend-cloudtrail-logs-compression-factor`,
+  `--defend-vpc-flow-logs-bucket`, `--defend-vpc-flow-logs-compression-factor`,
+  `--defend-route53-resolver-logs-bucket`, `--defend-route53-resolver-logs-compression-factor`,
+  `--max-workers`, `--verbose`, `--debug`.
+- **gcp-cloud** — Common: `--all`, `--data`, `--images`, `--projects` (idfile→`projects.txt`),
+  `--output-dir`. Advanced: `--id` (single project), `--exclude` (idfile→`excluded-folders.txt`),
+  `--include-project-regex`, `--exclude-project-regex`, `--start-after-project`,
+  `--max-projects`, `--max-pages-per-request`, `--max-workers`, `--max-run-minutes`,
+  `--max-image-tags`, `--request-timeout`, `--checkpoint-interval`, `--inventory-instructions`,
+  `--verbose`, `--debug`.
+- **gcp-defend** — Common: `--project-id` (str) | `--organization-id` + `--org-aggregate`
+  (toggle; org id from `gcp_org` detect), `--log-analysis-days` (int), `--output-filename`.
+  Advanced: `--use-sink-metrics`, `--sink-name`, `--no-exclusion-adjustment`, `--workers`,
+  `--errors-log-filename`, `--verbose`, `--debug`.
+- **github** — Required: `--token` (env `GITHUB_TOKEN`, launcher convention). Common: `--org`,
+  `--repo`, `--url` (Enterprise), `--output-dir`. Advanced: `--max-workers`,
+  `--progress-interval`, `--decrypt`, `--verbose`, `--debug`.
+- **gitlab** — Required: `--token` (env `GITLAB_TOKEN`, launcher convention). Common: `--group`,
+  `--project`, `--url`, `--output-dir`. Advanced: `--max-workers`, `--progress-interval`,
+  `--decrypt`, `--verbose`, `--debug`.
+- **m365** (`-` PowerShell flags) — Common: `-SummaryOnly`, `-MaxSites`, `-ProgressInterval`.
+  Advanced: `-AppName`, `-KeepTemporaryApp`, `-MaxRetries`, `-MaxRetryDelaySeconds`,
+  `-PermissionPropagationSeconds`, `-UseDeviceCode`.
+
+## Appendix C — Mode ids, profiles, and CLI contract
+
+Each `wiz-*.py` accepts the same flags: `--list`, `--mode <id>`, `--profile <id>`, `--dry-run`,
+`--set=--flag=value` (repeatable; attached `=` form), and the per-mode flags from Appendix B.
+
+- `wiz-azure.py` modes: `azure-cloud`, `azure-defend`, `azure-devops`.
+  Profiles: `azure-recommended` (azure-cloud `--all` + azure-defend `--all-subscriptions`; offer
+  azure-devops + m365), `azure-microsoft` (azure-cloud + azure-defend → azure-devops → m365 as
+  committed steps).
+- `wiz-aws.py` modes: `aws-cloud`, `aws-defend`. Profile: `aws-recommended` (aws-cloud `--all`
+  `--data` `--images` → aws-defend).
+- `wiz-gcp.py` modes: `gcp-cloud`, `gcp-defend`. Profile: `gcp-recommended` (gcp-cloud `--all`
+  `--data` `--images` → gcp-defend `--org-aggregate` with detected `--organization-id`).
+- `wiz-code.py` modes: `github`, `gitlab` (no profile).
+
+## Appendix D — Per-file Definition of Done
+
+A `wiz-<x>.py` is complete when:
+1. Every mode listed for it runs via menu and `--mode`, and `--list`/`--dry-run`/`--profile`
+   work with **no SDKs installed** (lazy imports).
+2. CSV writer paths match the legacy `writerow` calls (§9.1) and `tests/` assert the §3
+   filename + headers for each mode (§9.2).
+3. Scaffolding unit tests pass (§9.3); all Appendix-B flags are present and serialize correctly
+   (idfile → bare toggle + `.txt`; single-target → `--id`; `aws-defend` has **no** `--output-dir`).
+4. Dependency preflight shows the correct `pip3 install …` (with `--user` for Azure/GCP Defend)
+   and re-probes after install.
+5. Token modes prompt masked, reuse the right env var, and auto-detect where specified.
+6. The legacy script(s) for those modes are deleted and no path references remain.
+7. The in-shell matrix step (§9.4) is documented for an operator to run.
