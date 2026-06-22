@@ -391,15 +391,23 @@ def collect_tokens(mode):
 # ---------------------------------------------------------------------------
 # Execution — in-process for python modes, subprocess for pwsh
 # ---------------------------------------------------------------------------
-def choose_cwd(mode, values):
-    """Pick a working directory from an --output-dir option if present."""
+def run_cwd():
+    """Directory the embedded scanner runs in (where scope idfiles are read)."""
+    return os.getcwd()
+
+
+def output_location(mode, values):
+    """Resolved directory the chosen mode writes its CSV to (for reporting only).
+
+    The embedded scanners own --output-dir themselves (they makedirs + join on
+    it), so the engine does NOT chdir into it — doing so would double-apply a
+    relative path (e.g. out/ -> out/out/). This is used only for the post-run
+    message so the operator sees where the CSV actually landed.
+    """
     for opt in mode["options"]:
         if opt["flag"] == "--output-dir":
-            val = values.get(opt["flag"]) or opt.get("default")
-            if val:
-                p = Path(val).expanduser()
-                if p.is_dir():
-                    return str(p)
+            val = values.get(opt["flag"]) or opt.get("default") or "."
+            return str(Path.cwd() / Path(val).expanduser())
     return os.getcwd()
 
 
@@ -477,7 +485,7 @@ def _dry(mode, values, tokens, cwd, extra_argv=None):
 
 
 def run_mode(mode, values, tokens=None, extra_argv=None):
-    cwd = choose_cwd(mode, values)
+    cwd = run_cwd()
     if DRY_RUN:
         return _dry(mode, values, tokens, cwd, extra_argv)
     if mode["runner"] == "pwsh":
@@ -490,7 +498,7 @@ def run_mode(mode, values, tokens=None, extra_argv=None):
     rc = _run_embedded(mode["blob"], argv, cwd)
     print("  " + "-" * 60)
     print("  Exit code: %s" % rc)
-    print("  Output written under: %s" % cwd)
+    print("  Output written under: %s" % output_location(mode, values))
     return rc
 
 

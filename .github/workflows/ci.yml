@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generated wiz-*.py are up to date with tools/
+        run: python3 tools/build_wiz.py --check
+      - name: Unit tests (CSV contract + scaffolding)
+        run: python3 -m unittest discover -s tests -v

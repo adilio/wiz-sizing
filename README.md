@@ -139,8 +139,24 @@ python3 -m unittest discover -s tests
 ```
 
 The embedded payload inside each `wiz-*.py` is the source of truth, so
-scaffolding changes regenerate even after the original `sizing-scripts/` tree was
-removed (it remains in git history if you need to re-derive a scanner).
+**scaffolding** changes (anything in `tools/_engine.py` or `tools/config_*.py`)
+regenerate cleanly even though the original `sizing-scripts/` tree has been
+removed — `build_wiz.py` reuses the blob already embedded in the committed file.
+
+Changing a **scanner** (the lifted per-cloud logic) is the one case that needs
+the legacy source back. It lives in git history; restore, edit, and rebuild:
+
+```bash
+# bring back the one scanner you need to change
+git checkout ef801dc -- sizing-scripts/cloud/azure/resource-count-azure-v2.py
+# edit it, then rebuild — the new source is re-embedded into wiz-azure.py
+python3 tools/build_wiz.py azure
+python3 -m unittest discover -s tests   # CSV-contract + scaffolding gates
+```
+
+(The per-scanner paths are listed in `tools/build_wiz.py`'s `SPECS`.) Because the
+embedded blob is byte-checked only at build time, keep scanner edits going through
+this restore-edit-rebuild path rather than hand-editing the base64 in `wiz-*.py`.
 
 ## Verifying a real run (operator checklist)
 

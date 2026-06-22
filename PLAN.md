@@ -1,16 +1,23 @@
-# Wiz Sizing — Single-File-Per-CSP Plan (v3, ACTIVE)
+# Wiz Sizing — Single-File-Per-CSP Plan (v3, IMPLEMENTED)
 
-> **Status (2026-06-20): PLANNING — approved direction.** The repo currently holds a launcher
-> (shipped on `main`, `9b0c684`/`ef801dc`) that wraps nine independent sizing scripts under a
-> deep `sizing-scripts/{cloud,defend,code,saas}/…` tree, with a 2-line root `README.md` stub.
-> **This v3 plan replaces that with one self-contained, curl-able script per CSP.** The owner's
-> decision: *single file per CSP* — `wiz-azure.py`, `wiz-aws.py`, `wiz-gcp.py`, plus `wiz-code.py`
-> (GitHub/GitLab) and M365 left as its own PowerShell curl. **Be bold; do not preserve the
-> original script layout or internals.** The one sacred thing is the **CSV output** (format and
-> data); see §3.
+> **Status (2026-06-22): IMPLEMENTED.** The repo ships one self-contained, curl-able script per
+> CSP — `wiz-azure.py`, `wiz-aws.py`, `wiz-gcp.py`, `wiz-code.py` (GitHub/GitLab), plus the
+> standalone `wiz-365.ps1` for Microsoft 365. Each `wiz-*.py` is the artifact you `curl` and run.
 >
-> This file is self-contained: after a context reset, implement directly from it. The prior
-> v1/v2 design lives in git history (`ef801dc` and earlier).
+> **Architecture: approach (B), the amalgamation build (see §4).** Rather than hand-maintaining
+> five near-identical files, the shared scaffolding lives once in `tools/_engine.py`, the per-CSP
+> menus/options/profiles in `tools/config_<csp>.py`, and each legacy scanner's verbatim source is
+> embedded (gzip+base64). `tools/build_wiz.py` concatenates these into the committed `wiz-*.py`
+> files; `tools/build_wiz.py --check` (run in CI) guards against staleness. The **CSV output**
+> (§3) is preserved by construction: the scanner source runs in-process, unmodified.
+>
+> **Maintenance note.** The original `sizing-scripts/` tree has been torn down — it lives in git
+> history. The embedded blob inside each `wiz-*.py` is therefore the source of truth for scanner
+> logic, and `build_wiz.py` re-reads existing blobs when the legacy tree is absent. To change a
+> *scanner*, restore its file from git history into `sizing-scripts/`, edit it, and rebuild (see
+> README → "Maintaining the files"). *Scaffolding* changes (engine/config) need no such restore.
+>
+> The prior v1/v2 launcher design lives in git history (`ef801dc` and earlier).
 
 ---
 
@@ -74,36 +81,40 @@ Notes:
 ## 4. Architecture & the duplication question
 
 The hard part of "single file per CSP" is the shared scaffolding (menu, dependency preflight,
-CSV writer, scope-`idfile` handling, profiles). Two ways to keep it DRY; **default to (A)**:
+CSV writer, scope-`idfile` handling, profiles). Two ways to keep it DRY were weighed;
+**approach (B) was adopted** — the per-cloud option/profile surface plus five embedded scanners
+made hand-maintained copies (A) the higher-drift choice in practice:
 
-- **(A) Hand-authored files, small shared scaffolding by convention (DEFAULT).** Keep the shared
-  scaffolding deliberately *small and stable* (~300–400 lines: a numbered-menu UI, `deps`
-  preflight, `output` CSV writer, token/idfile helpers). It is copied into each `wiz-*.py`. The
-  large, genuinely per-cloud scanning logic (lifted from the existing scripts) is not duplicated.
-  Drift risk is low because the scaffolding rarely changes once set. **Simplest; what's in the
-  repo is what you run; curl works straight from the repo.**
-- **(B) Amalgamation build (fallback if duplication bites).** Keep one copy of the scaffolding in
-  `src/common/` and per-mode logic in `src/providers/`, plus a `build.py` that concatenates the
-  needed pieces into each root `wiz-*.py`. DRY source, single-file output, but the artifact ≠ the
-  source and the built files must be regenerated + committed (a `build.py --check` test guards
-  staleness). Adopt only if (A)'s duplication becomes a real maintenance cost.
+- **(A) Hand-authored files, small shared scaffolding by convention.** Keep the shared scaffolding
+  deliberately *small and stable* and copy it into each `wiz-*.py`. The genuinely per-cloud
+  scanning logic is not duplicated. Simplest in the abstract, but with five files it means
+  hand-syncing every scaffolding edit across all of them. *Not chosen.*
+- **(B) Amalgamation build — ADOPTED.** One copy of the scaffolding in `tools/_engine.py`, the
+  per-CSP menus/options/profiles in `tools/config_<csp>.py`, and each legacy scanner embedded
+  verbatim (gzip+base64). `tools/build_wiz.py` concatenates these into each root `wiz-*.py`;
+  `build_wiz.py --check` guards staleness in CI. DRY source, single-file curl-able output. The
+  tradeoff: the committed `wiz-*.py` is a build artifact, and once `sizing-scripts/` is torn down
+  the embedded blob is the source of truth for scanner logic (see the §-top Maintenance note).
 
-Repo layout under **(A)**:
+Repo layout as built under **(B)**:
 
 ```
 wiz-sizing/
 ├─ README.md         # THE single authoritative doc (root), replaces the stub
 ├─ LICENSE           # unchanged (MIT)
 ├─ PLAN.md           # this file
-├─ wiz-azure.py      # self-contained, curl-able  ← built first (§8)
-├─ wiz-aws.py        # self-contained, curl-able
-├─ wiz-gcp.py        # self-contained, curl-able
-├─ wiz-code.py       # self-contained, curl-able (GitHub/GitLab)
+├─ wiz-azure.py      # self-contained, curl-able  (generated)
+├─ wiz-aws.py        # self-contained, curl-able  (generated)
+├─ wiz-gcp.py        # self-contained, curl-able  (generated)
+├─ wiz-code.py       # self-contained, curl-able  (generated; GitHub/GitLab)
 ├─ wiz-365.ps1       # Microsoft 365 (PowerShell), standalone
+├─ tools/            # build inputs (dev only — not needed to run a wiz-*.py)
+│  ├─ _engine.py     # shared scaffolding (menu, deps, idfiles, profiles)
+│  ├─ config_*.py    # per-CSP menu/options/profiles
+│  └─ build_wiz.py   # assembles config + engine + embedded scanners -> wiz-*.py
 └─ tests/
-   ├─ test_azure.py  # menu/argv/profile + CSV-contract assertions for wiz-azure
-   ├─ test_output_contract.py  # the §3 headers/filenames across all files
-   └─ ...
+   ├─ test_output_contract.py  # §3 headers/filenames across all files
+   └─ test_scaffolding.py      # argv/idfile/profile/CLI assertions
 ```
 
 The deep `sizing-scripts/{cloud,defend,code,saas}/…` tree is **dissolved**: each script's
@@ -187,6 +198,9 @@ wiz-azure.py
   one-liner to run in a `pwsh`-capable shell. M365 itself stays the standalone `wiz-365.ps1`.
 
 ## 8. Migration phases (Azure first; each independently verifiable)
+
+> **All phases below are complete** (see §-top status). The cloud-side step 9.4 matrix remains an
+> operator release step — it needs live CloudShells and is not a code-landing blocker.
 
 1. **`wiz-azure.py` — first complete vertical slice.** Author the shared scaffolding (§5.2) and
    lift the three Azure modes (cloud resource-count, Defend log-volume, Azure DevOps) into it.
