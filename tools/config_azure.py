@@ -14,8 +14,9 @@ One-line bootstrap (Azure Cloud Shell):
 
 Run with no arguments for the interactive menu, or:
   python3 wiz-azure.py --list
-  python3 wiz-azure.py --mode azure-cloud --dry-run
-  python3 wiz-azure.py --profile azure-recommended
+  python3 wiz-azure.py cloud --dry-run
+  python3 wiz-azure.py cloud --all --quick
+  python3 wiz-azure.py recommended
 
 The cloud scanning logic is the original standalone sizing scripts, embedded
 verbatim and run in-process, so the CSV output is byte-identical to those.

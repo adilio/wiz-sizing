@@ -114,7 +114,8 @@ class TestCliEndToEnd(unittest.TestCase):
     def test_list(self):
         r = self.run_file("azure", "--list")
         self.assertEqual(r.returncode, 0)
-        self.assertIn("azure-cloud", r.stdout)
+        self.assertIn("cloud", r.stdout)          # short subcommand
+        self.assertIn("azure-cloud", r.stdout)    # full id still discoverable
 
     def test_dry_run_mode(self):
         r = self.run_file("azure", "--mode", "azure-cloud", "--dry-run",
@@ -126,11 +127,37 @@ class TestCliEndToEnd(unittest.TestCase):
     def test_dry_run_profile(self):
         r = self.run_file("aws", "--profile", "aws-recommended", "--dry-run")
         self.assertEqual(r.returncode, 0)
-        self.assertIn("aws-cloud", r.stdout)
-        self.assertIn("aws-defend", r.stdout)
+        self.assertIn("cloud", r.stdout)
+        self.assertIn("defend", r.stdout)
 
     def test_unknown_mode_errors(self):
         r = self.run_file("azure", "--mode", "nope", "--dry-run")
+        self.assertEqual(r.returncode, 2)
+
+    # --- modern positional subcommand form ---
+
+    def test_subcommand_mode(self):
+        # `wiz-azure.py cloud --all` with --dry-run hoisted from after the command
+        r = self.run_file("azure", "cloud", "--dry-run", "--all")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("[dry-run]", r.stdout)
+        self.assertIn("wiz-azure.py cloud", r.stdout)
+        self.assertIn("--all", r.stdout)
+
+    def test_subcommand_full_id_alias(self):
+        # the full id works as a subcommand too
+        r = self.run_file("azure", "azure-cloud", "--dry-run")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("wiz-azure.py cloud", r.stdout)
+
+    def test_subcommand_profile(self):
+        r = self.run_file("aws", "recommended", "--dry-run")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("wiz-aws.py cloud", r.stdout)
+        self.assertIn("wiz-aws.py defend", r.stdout)
+
+    def test_unknown_command_errors(self):
+        r = self.run_file("azure", "bogus", "--dry-run")
         self.assertEqual(r.returncode, 2)
 
 

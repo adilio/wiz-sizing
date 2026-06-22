@@ -11,8 +11,8 @@ One-line bootstrap (AWS CloudShell):
 
 Run with no arguments for the interactive menu, or:
   python3 wiz-aws.py --list
-  python3 wiz-aws.py --mode aws-cloud --dry-run
-  python3 wiz-aws.py --profile aws-recommended
+  python3 wiz-aws.py cloud --dry-run
+  python3 wiz-aws.py recommended
 
 The cloud scanning logic is the original standalone sizing scripts, embedded
 verbatim and run in-process, so the CSV output is byte-identical to those.

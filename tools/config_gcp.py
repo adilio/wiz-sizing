@@ -11,8 +11,8 @@ One-line bootstrap (GCP Cloud Shell):
 
 Run with no arguments for the interactive menu, or:
   python3 wiz-gcp.py --list
-  python3 wiz-gcp.py --mode gcp-cloud --dry-run
-  python3 wiz-gcp.py --profile gcp-recommended
+  python3 wiz-gcp.py cloud --dry-run
+  python3 wiz-gcp.py recommended
 
 The cloud scanning logic is the original standalone sizing scripts, embedded
 verbatim and run in-process, so the CSV output is byte-identical to those.

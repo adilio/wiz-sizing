@@ -12,7 +12,8 @@ One-line bootstrap (run anywhere):
 
 Run with no arguments for the interactive menu, or:
   python3 wiz-code.py --list
-  python3 wiz-code.py --mode github --dry-run
+  python3 wiz-code.py github --dry-run
+  python3 wiz-code.py gitlab --url https://gitlab.example.com
 
 The scanning logic is the original standalone sizing scripts, embedded verbatim
 and run in-process, so the CSV output is byte-identical to those.

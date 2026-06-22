@@ -67,20 +67,26 @@ A **profile** is a recommended, one-confirmation sweep:
 Scope identity is auto-detected best-effort and never blocks: Azure tenant
 (`az`), GCP org (`gcloud`), Azure DevOps org (`az devops`).
 
-### Non-interactive flags
+### Non-interactive use
 
-Every file accepts the same flags:
+Run a mode or profile as a **subcommand** (git/docker/aws style); any flags
+after it go straight to the scanner:
 
 ```bash
-python3 wiz-azure.py --list                       # list modes & profiles
-python3 wiz-azure.py --mode azure-cloud --dry-run # show the command, run nothing
-python3 wiz-azure.py --profile azure-recommended  # run a profile
-python3 wiz-azure.py --mode azure-cloud --set=--all=on --set=--max-workers=8
-python3 wiz-azure.py --mode azure-cloud -- --all --debug   # pass flags through after --
+python3 wiz-azure.py --list                  # list commands
+python3 wiz-azure.py cloud --dry-run         # show the command, run nothing
+python3 wiz-azure.py cloud --all --max-workers 8
+python3 wiz-azure.py recommended             # run a profile
+python3 wiz-azure.py --dry-run cloud --all   # global flags may precede the command
 ```
 
-`--set=--flag=value` sets an option (use the attached `=` form; repeatable).
-Anything after a bare `--` is passed straight to the underlying mode.
+Subcommands accept the short name (`cloud`) or the full id (`azure-cloud`);
+`--list` shows both. Global flags (`--list`, `--dry-run`, `--no-curses`) work
+before or after the command.
+
+> Earlier releases used `--mode <id>`, `--profile <id>`, `--set=--flag=value`,
+> and a bare `--` separator. Those still work as deprecated aliases, but the
+> subcommand form above is preferred.
 
 ### Scope lists
 
@@ -142,14 +148,10 @@ final CSV has zero drift versus the original method.
 Flags:
 
 ```bash
-python3 wiz-azure.py --mode azure-cloud -- --all               # estimate, then authoritative scan (default)
-python3 wiz-azure.py --mode azure-cloud -- --all --quick        # estimate only (fastest, approximate)
-python3 wiz-azure.py --mode azure-cloud -- --all --no-preview   # skip the estimate, scan directly
+python3 wiz-azure.py cloud --all               # estimate, then authoritative scan (default)
+python3 wiz-azure.py cloud --all --quick        # estimate only (fastest, approximate)
+python3 wiz-azure.py cloud --all --no-preview   # skip the estimate, scan directly
 ```
-
-(Anything after the bare `--` is passed straight to the scanner. The
-menu-style `--set=--flag=value` form works too, but `--` is cleaner for
-real scanner flags.)
 
 `--max-workers` is now a single global cap across all subscriptions × resource
 types. `--graph` is a deprecated alias for `--quick`.

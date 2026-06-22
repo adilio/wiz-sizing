@@ -14,8 +14,9 @@ One-line bootstrap (Azure Cloud Shell):
 
 Run with no arguments for the interactive menu, or:
   python3 wiz-azure.py --list
-  python3 wiz-azure.py --mode azure-cloud --dry-run
-  python3 wiz-azure.py --profile azure-recommended
+  python3 wiz-azure.py cloud --dry-run
+  python3 wiz-azure.py cloud --all --quick
+  python3 wiz-azure.py recommended
 
 The cloud scanning logic is the original standalone sizing scripts, embedded
 verbatim and run in-process, so the CSV output is byte-identical to those.
@@ -253,6 +254,91 @@ def profile_by_id(profile_id):
     return None
 
 
+def _file_stem():
+    """The cloud stem of this file, e.g. 'azure' for wiz-azure.py."""
+    base = FILE_BASENAME
+    if base.startswith("wiz-"):
+        base = base[len("wiz-"):]
+    if base.endswith(".py"):
+        base = base[:-len(".py")]
+    return base
+
+
+def command_alias(item_id):
+    """Short subcommand name for a mode/profile id.
+
+    Drops the redundant cloud prefix the file already implies, so
+    'azure-cloud' is invoked as 'cloud' and 'azure-recommended' as
+    'recommended'. Ids without that prefix (e.g. 'github') are unchanged.
+    """
+    prefix = _file_stem() + "-"
+    if item_id.startswith(prefix):
+        return item_id[len(prefix):]
+    return item_id
+
+
+def resolve_command(token):
+    """Resolve a positional subcommand to ('mode', mode) / ('profile', profile).
+
+    Accepts both the short alias ('cloud') and the full id ('azure-cloud').
+    Returns (None, None) if nothing matches.
+    """
+    for mode in MODES:
+        if token in (mode["id"], command_alias(mode["id"])):
+            return ("mode", mode)
+    for profile in PROFILES:
+        if token in (profile["id"], command_alias(profile["id"])):
+            return ("profile", profile)
+    return (None, None)
+
+
+# Legacy global options that take a value (kept for back-compat).
+_VALUE_GLOBALS = ("--mode", "--profile", "--set")
+# Boolean engine flags that stay engine-level even after the subcommand.
+# (No scanner defines these, so hoisting them out of passthrough is safe.)
+_HOISTABLE_GLOBALS = ("--list", "--dry-run", "--no-curses")
+
+
+def split_invocation(argv):
+    """Split argv into (global_argv, command, passthrough).
+
+    Modern form:  <command> [scanner flags...]
+    Legacy form:  --mode ID [--set ...] [-- scanner flags...]
+
+    Global flags may precede the command; everything after the command goes
+    to the scanner verbatim. The boolean engine flags in _HOISTABLE_GLOBALS
+    are pulled back to engine level even if typed after the command.
+    """
+    global_argv, command, passthrough = [], None, []
+    i, n = 0, len(argv)
+    while i < n:
+        tok = argv[i]
+        if command is None:
+            if tok == "--":
+                passthrough = argv[i + 1:]
+                break
+            if tok.startswith("-"):
+                global_argv.append(tok)
+                name = tok.split("=", 1)[0]
+                if name in _VALUE_GLOBALS and "=" not in tok and i + 1 < n:
+                    i += 1
+                    global_argv.append(argv[i])
+                i += 1
+                continue
+            command = tok
+            i += 1
+            continue
+        passthrough = argv[i:]
+        if passthrough and passthrough[0] == "--":
+            passthrough = passthrough[1:]
+        break
+    hoisted = [t for t in passthrough if t in _HOISTABLE_GLOBALS]
+    if hoisted:
+        passthrough = [t for t in passthrough if t not in _HOISTABLE_GLOBALS]
+        global_argv += hoisted
+    return global_argv, command, passthrough
+
+
 # ---------------------------------------------------------------------------
 # Scope-identity auto-detection (best-effort; never blocks)
 # ---------------------------------------------------------------------------
@@ -407,9 +493,7 @@ def preview_command(mode, values, tokens=None, extra_argv=None):
     argv = build_argv(mode, values, _mask_tokens(mode, tokens)) + list(extra_argv or [])
     if mode["runner"] == "pwsh":
         return quote_command(["pwsh", "-File", mode.get("ps_file", "")] + argv)
-    base = ["python3", FILE_BASENAME, "--mode", mode["id"]]
-    if argv:
-        base.append("--")
+    base = ["python3", FILE_BASENAME, command_alias(mode["id"])]
     return quote_command(base + argv)
 
 
@@ -1040,13 +1124,20 @@ def run_session(frontend):
 # ===========================================================================
 def cmd_list():
     print("%s\n" % FILE_TITLE)
-    print("Modes (run with --mode <id>):")
+    print("Usage: %s <command> [flags]   (or no args for the interactive menu)\n" % FILE_BASENAME)
+
+    def row(item):
+        alias = command_alias(item["id"])
+        suffix = "" if alias == item["id"] else "  [%s]" % item["id"]
+        print("  %-12s %s%s" % (alias, item["label"], suffix))
+
+    print("Modes:")
     for mode in MODES:
-        print("  %-14s %s" % (mode["id"], mode["label"]))
+        row(mode)
     if PROFILES:
-        print("\nProfiles (run with --profile <id>):")
+        print("\nProfiles:")
         for profile in PROFILES:
-            print("  %-18s %s" % (profile["id"], profile["label"]))
+            row(profile)
 
 
 def _parse_set_values(mode, set_args):
@@ -1096,41 +1187,64 @@ def main(argv=None):
         epilog="One-line bootstrap:\n  %s" % ONELINER,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("command", nargs="?", metavar="COMMAND",
+                        help="Mode or profile to run (e.g. cloud, defend, "
+                             "recommended). Omit for the interactive menu. "
+                             "Flags after it go to the scanner.")
     parser.add_argument("--list", action="store_true",
-                        help="List modes and profiles, then exit.")
-    parser.add_argument("--mode", metavar="ID", help="Run a single mode by id.")
-    parser.add_argument("--profile", metavar="ID", help="Run a profile by id.")
+                        help="List commands, then exit.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would run; never execute.")
-    parser.add_argument("--set", metavar="FLAG=VALUE", action="append",
-                        help="With --mode: set an option (e.g. --set=--all=on). "
-                             "Repeatable; use the attached = form.")
     parser.add_argument("--no-curses", action="store_true",
                         help="Force the numbered-prompt menu.")
-    args, passthrough = parser.parse_known_args(argv)
-    if passthrough and passthrough[0] == "--":
-        passthrough = passthrough[1:]
+    parser.add_argument("--mode", metavar="ID",
+                        help="(deprecated) Run a mode by id; prefer COMMAND.")
+    parser.add_argument("--profile", metavar="ID",
+                        help="(deprecated) Run a profile by id; prefer COMMAND.")
+    parser.add_argument("--set", metavar="FLAG=VALUE", action="append",
+                        help="(deprecated) Set a mode option (e.g. --set=--all=on); "
+                             "prefer flags after COMMAND. Repeatable.")
+    if argv is None:
+        argv = sys.argv[1:]
+    global_argv, command, passthrough = split_invocation(list(argv))
+    args = parser.parse_args(global_argv)
     DRY_RUN = args.dry_run
 
     if args.list:
         cmd_list()
         return 0
 
-    if args.profile:
+    # Resolve the run target: positional COMMAND (modern) wins, then fall back
+    # to the deprecated --mode / --profile flags.
+    mode = profile = None
+    if command is not None:
+        kind, obj = resolve_command(command)
+        if kind == "mode":
+            mode = obj
+        elif kind == "profile":
+            profile = obj
+        else:
+            print("Unknown command: %s (run --list to see options)" % command,
+                  file=sys.stderr)
+            return 2
+    elif args.profile:
         profile = profile_by_id(args.profile)
         if profile is None:
             print("Unknown profile id: %s" % args.profile, file=sys.stderr)
             return 2
+    elif args.mode:
+        mode = mode_by_id(args.mode)
+        if mode is None:
+            print("Unknown mode id: %s" % args.mode, file=sys.stderr)
+            return 2
+
+    if profile is not None:
         if DRY_RUN:
             return cmd_dry_run_profile(profile)
         run_profile(PromptUI(), profile)
         return 0
 
-    if args.mode:
-        mode = mode_by_id(args.mode)
-        if mode is None:
-            print("Unknown mode id: %s" % args.mode, file=sys.stderr)
-            return 2
+    if mode is not None:
         values = _parse_set_values(mode, args.set)
         tokens = None
         if mode.get("token_args") and not DRY_RUN:
