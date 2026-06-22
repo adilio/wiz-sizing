@@ -142,10 +142,14 @@ final CSV has zero drift versus the original method.
 Flags:
 
 ```bash
-python3 wiz-azure.py --mode azure-cloud --set=--all=on                 # estimate, then authoritative scan (default)
-python3 wiz-azure.py --mode azure-cloud --set=--all=on --set=--quick=on    # estimate only (fastest, approximate)
-python3 wiz-azure.py --mode azure-cloud --set=--all=on --set=--no-preview=on  # skip the estimate, scan directly
+python3 wiz-azure.py --mode azure-cloud -- --all               # estimate, then authoritative scan (default)
+python3 wiz-azure.py --mode azure-cloud -- --all --quick        # estimate only (fastest, approximate)
+python3 wiz-azure.py --mode azure-cloud -- --all --no-preview   # skip the estimate, scan directly
 ```
+
+(Anything after the bare `--` is passed straight to the scanner. The
+menu-style `--set=--flag=value` form works too, but `--` is cleaner for
+real scanner flags.)
 
 `--max-workers` is now a single global cap across all subscriptions × resource
 types. `--graph` is a deprecated alias for `--quick`.
