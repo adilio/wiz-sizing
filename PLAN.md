@@ -1,5 +1,179 @@
 # Wiz Sizing — Single-File-Per-CSP Plan (v3, IMPLEMENTED)
 
+---
+
+# Azure cloud scan: speed + two-phase ARG/SDK (2026-06-22)
+
+> **Status: IMPLEMENTED (2026-06-22).** The `azure-cloud` scan now runs the two-phase design below:
+> a fast whole-tenant Azure Resource Graph **preview** (`Preliminary estimate (Azure Resource
+> Graph):`) followed by the authoritative SDK **detailed scan**, now parallelized across
+> subscriptions via one global `ThreadPoolExecutor(max_workers=…)`. New flags `--quick` (estimate
+> only) and `--no-preview` (skip the estimate) ship in both the scanner and `tools/config_azure.py`;
+> `--graph` is a deprecated alias for `--quick`. The per-subscription `graph_mode` branches were
+> removed from the resource functions, the scanner version is `2.9.0`, `wiz-azure.py` was rebuilt,
+> and the README Azure section documents the behavior. The CSV contract (filenames, headers, `totals`
+> taxonomy, counting rules) is unchanged. The original spec follows for reference. Defend and DevOps
+> are untouched.
+
+## 0. One-paragraph summary
+
+Make the Azure resource-count scan **fast and progressive** without sacrificing accuracy. Today the
+scan walks subscriptions **strictly sequentially** (`main()` loops `filtered_subscriptions` one at a
+time; within a subscription ~11 resource-type calls run in a thread pool). On a 30–50 subscription
+tenant this is the dominant cost, and the operator sees nothing until subscriptions finish. The new
+design runs in **two phases**: (1) a fast **Azure Resource Graph (ARG)** preview that counts the
+whole tenant in a handful of cross-subscription KQL queries and prints a **preliminary estimate**
+within seconds; then (2) an **authoritative detailed pass** that runs the *existing* SDK counting
+logic but **parallelized across subscriptions** (not one at a time), correcting the preliminary
+numbers in place. ARG is a preview; the SDK pass is the source of truth → **final counts have zero
+drift vs today**, and the CSV output format is unchanged.
+
+## 1. Where the code is and how to build it (read first)
+
+- **Scanner to edit:** `sizing-scripts/cloud/azure/resource-count-azure-v2.py` (currently ~1280
+  lines; the file analyzed for this spec). It is the source of truth for `azure-cloud` logic.
+  - If that file is **absent** (the tree gets torn down between sessions — see the Maintenance note
+    below), restore it with: `git checkout 5282e5b~1 -- sizing-scripts`
+- **Menu/flag metadata:** `tools/config_azure.py` (the `azure-cloud` mode's `options` list). New
+  flags must be added here too so the interactive menu can offer/serialize them.
+- **Rebuild after editing the scanner:** `python3 tools/build_wiz.py azure` — this re-embeds the
+  edited scanner (gzip+base64) into the committed `wiz-azure.py`. The build round-trips and
+  recompiles; `wiz-azure.py` is a generated artifact — **never hand-edit it.**
+- **Verify the build is current & tests pass:**
+  - `python3 tools/build_wiz.py --check`  (CI gate; must report no staleness)
+  - `python3 -m pytest tests/ -q`  (or `python3 -m unittest discover tests`)
+- The cloud scan **cannot run locally** (needs an authenticated Azure Cloud Shell). Logic changes
+  are verified structurally (tests + `--check`); behavioral verification is a Cloud Shell step (§7).
+
+## 2. Hard constraints — do NOT change these
+
+The §3 CSV contract below still binds. Concretely, in the scanner:
+
+- **Filenames:** `azure-resources.csv`, `azure-resources-log.csv`, `azure-errors-log.txt`.
+- **Headers:** summary `['Resource Type', 'Resource Count']`; detailed/log
+  `['Resource Type', 'Resource Count', 'Subscription']`.
+- **The `totals` dict keys** (the resource taxonomy) must stay the same set — `output_results()`
+  iterates them and `tests/test_output_contract.py` greps the header literals.
+- **Counting business rules must be preserved exactly in the SDK pass** (these are what guarantee
+  zero drift): skip `Vendor=Databricks` VMs and `application=Databricks` / `databricks-environment=true`
+  storage accounts; exclude the SQL `master` database; exclude scale-set-member VMs from the Compute
+  VM count (counted under Scale Sets); count Linux instances into `Virtual Machine Sensors`; AKS =
+  sum of `agentPoolProfiles[].count`; ACR images capped at `--max-image-tags` per repo.
+- The legacy file and its embedded blob must stay **byte-identical** (enforced by build + test) —
+  so all edits happen in `sizing-scripts/...` and are followed by a rebuild.
+
+## 3. Phase 1 — ARG preview (fast, whole-tenant, best-effort)
+
+A small set of KQL queries with **no `subscriptions=[...]` filter**, so ARG counts across every
+subscription the credential can see (current management group / tenant). For the preview we need
+**totals only** (the per-subscription detail rows come from the SDK pass), so prefer bare
+`summarize count()` — no `by subscriptionId` needed.
+
+Coverage — ARG can faithfully or near-faithfully count more types than today's partial `--graph`
+mode implements. Maximize what the preview shows:
+
+| `totals` key | ARG query (type) | Preview fidelity |
+|---|---|---|
+| Virtual Machines + Non-OS Disks | `microsoft.compute/virtualmachines` (+ `dataDisks` array length), filter out `tags.Vendor=='Databricks'` | High (standalone VMs; VMSS members aren't separate rows in ARG) |
+| Container Hosts + K8s Sensors | `microsoft.containerservice/managedclusters` → `mv-expand`/`sum(toint(pool['count']))` | High |
+| Serverless Functions | `microsoft.web/sites` + `microsoft.web/staticsites` | Approx (ARG misses *child* functions the SDK enumerates → preview slightly low) |
+| PaaS Databases | `microsoft.sql/servers/databases`, exclude names ending `master` | High |
+| Serverless Containers | `microsoft.containerinstance/containergroups` + `microsoft.app/containerapps` | High |
+| Asset Metadata | `microsoft.hybridcompute/machines` + `microsoft.azurestackhci/clusters` | High |
+| Virtual Machines [Scale Sets] | `microsoft.compute/virtualmachinescalesets` → `sum(toint(sku.capacity))` | **Approx only** — capacity ≠ live instance count; SDK corrects |
+| Data Buckets (storage containers) | — | **Cannot** — containers are an account sub-resource not in ARG → show `pending` |
+| Registry Container Images (ACR) | — | **Cannot** — image/tag counts are registry data-plane → show `pending` |
+
+Print a clearly-labelled block, e.g. `Preliminary estimate (Azure Resource Graph):`, listing the
+counts ARG produced and marking the rest `pending detailed scan`. **Store these in a SEPARATE dict
+(e.g. `preview_totals`), NOT in `totals`** — Phase 2 must start `totals` at zero so it is fully
+authoritative and there is no double-counting. Phase 1 is **best-effort**: wrap it in try/except;
+on any failure (missing `azure-mgmt-resourcegraph`, permission error) print a one-line note and
+proceed straight to Phase 2.
+
+## 4. Phase 2 — authoritative detailed pass, parallelized across subscriptions
+
+Keep every per-resource function (`get_azure_vms`, `get_azure_vms_scale_sets`,
+`get_azure_aks_container_instances`, `get_azure_functions_web_apps`, `get_azure_container_instances`,
+`get_azure_container_apps`, `get_azure_storage_containers`, `get_azure_sql_servers`,
+`get_azure_arc_machines`, `get_azure_stack_hci_clusters`, `get_azure_acr_images`) **unchanged** —
+they already write via the thread-safe `add_total()` (`totals_lock`) and `progress_print()`
+(`log_lock`), so they are already safe to run concurrently across subscriptions.
+
+**Concurrency model — flatten to one global pool.** Replace today's "sequential subs, per-sub
+`ThreadPoolExecutor`" with a single `ThreadPoolExecutor(max_workers=args.max_workers)` over a flat
+list of `(subscription, fn)` work units built for every filtered subscription × every `enabled`
+resource type. This:
+- parallelizes across subscriptions (the main win), and
+- bounds total in-flight REST calls to one number (`--max-workers`) → throttle-friendly. Rely on the
+  Azure SDK's built-in exponential retry for 429s (already configured).
+
+`--debug` keeps its meaning: **sequential, no pool, exit on first error** — branch to the existing
+serial code path (preview may still run first).
+
+**Preserve the sub-level controls by filtering the subscription list *before* building work units:**
+`--start-after-subscription`, `--include/exclude-subscription-regex`, `--max-subscriptions`, and the
+`'Access to Azure Active Directory'` skip. For controls that are awkward under full parallelism:
+- `--max-run-minutes`: check `max_runtime_reached()` in the submit loop / a wrapper; stop submitting
+  and let in-flight finish, then write partial results.
+- `--checkpoint-interval`: track **completed subscriptions** (a subscription is "done" when all its
+  submitted futures resolve — use a per-sub countdown latch under a lock); write partial output every
+  N completed subs.
+- SIGINT handler still writes partial results — keep an accumulating `last_subscriptions` list
+  (lock-guarded) appended to as each subscription completes.
+
+**Final output is unchanged:** call the existing `output_results()` (it iterates `totals`). Print the
+authoritative block labelled e.g. `Final results (detailed scan):` so it visibly supersedes the
+preliminary estimate. Optionally show per-type deltas vs `preview_totals` (nice-to-have, not
+required).
+
+## 5. Flag surface (simplicity)
+
+Add to the scanner's `argparse` **and** to `tools/config_azure.py` (`azure-cloud` options):
+
+| Flag | Behavior |
+|---|---|
+| *(default)* | ARG preview → parallel SDK detailed (authoritative) |
+| `--quick` | ARG only; skip the detailed pass — fastest, approximate. Writes CSV from `preview_totals`. |
+| `--no-preview` | Skip ARG; go straight to the detailed pass (no-ARG-permission environments) |
+| `--max-workers N` | Existing flag; now the **global** cap across subs × resource types |
+| `--graph` (existing) | **Deprecate → alias for `--quick`.** Keep it parsing so nothing breaks; print a one-line "deprecated, use --quick" note. Remove the old partial per-sub graph branches inside the resource functions (their logic moves into the Phase 1 ARG queries). |
+
+When `--quick`: Phase 1 runs, its `preview_totals` become the result, write the CSV from them, label
+output as an estimate, and note which types are `pending`/excluded. When both `--quick` and
+`--no-preview` are given, error out (mutually exclusive).
+
+## 6. Implementation checklist (ordered)
+
+1. Restore the scanner if absent (`git checkout 5282e5b~1 -- sizing-scripts`).
+2. Add `--quick` / `--no-preview` to the scanner argparse; make `--graph` an alias for `--quick`
+   with a deprecation note; validate the mutual-exclusion.
+3. Write Phase 1: ARG query helpers (reuse `query_azure_resource_graph` but call it **without** a
+   subscription so it spans the tenant), populate `preview_totals`, print the preliminary block,
+   all wrapped best-effort.
+4. Rewrite `main()` orchestration: subscription discovery/filtering unchanged → Phase 1 (unless
+   `--no-preview`) → if `--quick` return after writing preview CSV → else Phase 2.
+5. Write Phase 2: flat global `ThreadPoolExecutor` over `(sub, fn)` units; per-sub completion latch
+   for checkpoint/SIGINT/`last_subscriptions`; honor `--max-run-minutes`/`--max-subscriptions`/
+   `--start-after`/regex via pre-filtering; keep the `--debug` serial path.
+6. Remove the now-dead per-sub `graph_mode` branches inside the resource functions (ARG lives in
+   Phase 1 now); keep the SDK bodies as the authoritative counters.
+7. Update `tools/config_azure.py`: add `--quick`, `--no-preview`; re-label `--graph` as deprecated.
+8. Rebuild: `python3 tools/build_wiz.py azure`.
+9. Update `README.md` Azure section to describe the two-phase behavior and the new flags.
+10. Bump the scanner `version` string.
+
+## 7. Verification
+
+- `python3 tools/build_wiz.py --check` → no staleness.
+- `python3 -m pytest tests/ -q` → green (CSV contract + scaffolding unchanged).
+- `python3 wiz-azure.py --mode azure-cloud --dry-run` and `--list` work with no SDKs installed.
+- Cloud Shell (operator step, not a landing blocker): run a small-scope scan, confirm the
+  preliminary block appears within seconds, the detailed pass corrects it, and the final
+  `azure-resources.csv` matches a legacy-script run for the same scope.
+
+---
+
 > **Status (2026-06-22): IMPLEMENTED.** The repo ships one self-contained, curl-able script per
 > CSP — `wiz-azure.py`, `wiz-aws.py`, `wiz-gcp.py`, `wiz-code.py` (GitHub/GitLab), plus the
 > standalone `wiz-365.ps1` for Microsoft 365. Each `wiz-*.py` is the artifact you `curl` and run.

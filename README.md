@@ -89,6 +89,67 @@ excluded folders) are entered as a comma/space list. The file writes them to the
 sibling `.txt` file the scanner reads (`regions.txt`, `subscriptions.txt`,
 `projects.txt`, `accounts.txt`, `excluded-folders.txt`) and passes the bare flag.
 
+### Azure Cloud scan: fast two-phase counting
+
+`azure-cloud` runs in two phases so you see numbers in seconds without losing
+accuracy:
+
+1. **Preliminary estimate (Azure Resource Graph).** A handful of cross-subscription
+   KQL queries count the whole tenant in seconds and print a labelled estimate.
+   Types ARG can't reach (storage containers, ACR images) show as `pending`.
+2. **Detailed scan (authoritative).** The full SDK counting logic runs, now
+   parallelized **across** subscriptions (bounded by `--max-workers`), and writes
+   the final `azure-resources.csv`. These counts are the source of truth and are
+   byte-identical to the previous behavior.
+
+#### Why the estimate is fast
+
+The detailed scan fans out **live ARM REST calls** — for every subscription it
+lists each of ~11 resource types, paginating, and several counts are N+1 (scale
+sets → their VMs, SQL servers → their databases, web apps → their child
+functions, AKS → its agent pools). That's thousands of throttled, full-payload
+calls counted client-side, scaling with subscription count.
+
+Azure Resource Graph inverts this:
+
+- **One query spans the whole tenant**, independent of how many subscriptions
+  there are — a handful of queries instead of thousands of calls.
+- **Server-side aggregation** — `summarize count()` runs inside ARG, so only the
+  final number crosses the network (the SDK ships every resource's full JSON).
+- **It reads a pre-built index** — ARG is a continuously-updated, Kusto-indexed
+  replica of ARM metadata, so there are no N+1 drill-downs and no rate-limit
+  backoff. Reading an index beats live provider fan-out.
+
+#### Why the estimate is slightly off
+
+Approximation is the tradeoff that buys the speed; the detailed pass corrects it:
+
+- **Scale Sets** — ARG reads `sku.capacity` (configured count), not live
+  instances; autoscale / spot eviction / in-flight scaling make these differ
+  (the largest source of drift).
+- **Storage containers & ACR images** — sub-resource / data-plane objects ARG
+  can't see, so they show as `pending` until the detailed pass counts them.
+- **Functions** — ARG counts function *apps* but not the individual functions
+  inside them, so it can read slightly low.
+- **Index freshness** — ARG lags ARM by seconds-to-minutes, so very recent
+  changes may not appear yet.
+- **Exclusion rules** (Databricks tags, SQL `master`) are fully applied only in
+  the SDK pass.
+
+The detailed scan is authoritative and always overrides the estimate, so the
+final CSV has zero drift versus the original method.
+
+Flags:
+
+```bash
+python3 wiz-azure.py --mode azure-cloud --set=--all=on                 # estimate, then authoritative scan (default)
+python3 wiz-azure.py --mode azure-cloud --set=--all=on --set=--quick=on    # estimate only (fastest, approximate)
+python3 wiz-azure.py --mode azure-cloud --set=--all=on --set=--no-preview=on  # skip the estimate, scan directly
+```
+
+`--max-workers` is now a single global cap across all subscriptions × resource
+types. `--graph` is a deprecated alias for `--quick`.
+
 ## Credentials
 
 - **Cloud & Defend** modes use the CloudShell's existing credentials (ambient
