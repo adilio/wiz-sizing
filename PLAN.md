@@ -15,6 +15,15 @@
 > taxonomy, counting rules) is unchanged. The original spec follows for reference. Defend and DevOps
 > are untouched.
 
+> **CLI update (2026-06-24).** The non-interactive surface moved from `--mode <id>` + a bare `--`
+> separator to **positional subcommands** (git/docker style): `wiz-azure.py cloud --all --quick`,
+> `wiz-aws.py recommended`, etc. Subcommands accept the short name (`cloud`) or the full id
+> (`azure-cloud`); flags after the subcommand pass straight to the scanner; global flags (`--list`,
+> `--dry-run`, `--no-curses`) work before or after it. The legacy `--mode`/`--profile`/`--set`/`--`
+> forms still parse as **deprecated aliases**, so nothing breaks. This lives in the shared
+> `tools/_engine.py` and applies to all `wiz-*.py`. Where older sections below still describe the
+> `--mode`/`--set`/`--profile` contract, read it as the deprecated-alias form.
+
 ## 0. One-paragraph summary
 
 Make the Azure resource-count scan **fast and progressive** without sacrificing accuracy. Today the
@@ -167,7 +176,7 @@ output as an estimate, and note which types are `pending`/excluded. When both `-
 
 - `python3 tools/build_wiz.py --check` → no staleness.
 - `python3 -m pytest tests/ -q` → green (CSV contract + scaffolding unchanged).
-- `python3 wiz-azure.py --mode azure-cloud --dry-run` and `--list` work with no SDKs installed.
+- `python3 wiz-azure.py cloud --dry-run` and `--list` work with no SDKs installed.
 - Cloud Shell (operator step, not a landing blocker): run a small-scope scan, confirm the
   preliminary block appears within seconds, the detailed pass corrects it, and the final
   `azure-resources.csv` matches a legacy-script run for the same scope.
@@ -530,8 +539,11 @@ sites named for §9 layer 1):
 
 ## Appendix C — Mode ids, profiles, and CLI contract
 
-Each `wiz-*.py` accepts the same flags: `--list`, `--mode <id>`, `--profile <id>`, `--dry-run`,
-`--set=--flag=value` (repeatable; attached `=` form), and the per-mode flags from Appendix B.
+Each `wiz-*.py` is invoked as `wiz-*.py <command> [scanner flags...]`, where `<command>` is a mode
+or profile id (short alias like `cloud`/`recommended`, or the full id), plus global flags `--list`,
+`--dry-run`, `--no-curses`. Flags after the command pass through to the per-mode scanner (Appendix
+B). The legacy `--mode <id>` / `--profile <id>` / `--set=--flag=value` / bare `--` forms remain as
+deprecated aliases (see the CLI update note at the top).
 
 - `wiz-azure.py` modes: `azure-cloud`, `azure-defend`, `azure-devops`.
   Profiles: `azure-recommended` (azure-cloud `--all` + azure-defend `--all-subscriptions`; offer
