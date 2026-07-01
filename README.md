@@ -95,66 +95,76 @@ excluded folders) are entered as a comma/space list. The file writes them to the
 sibling `.txt` file the scanner reads (`regions.txt`, `subscriptions.txt`,
 `projects.txt`, `accounts.txt`, `excluded-folders.txt`) and passes the bare flag.
 
-### Azure Cloud scan: fast two-phase counting
+### Azure Cloud scan: fast (default) vs authoritative
 
-`azure-cloud` runs in two phases so you see numbers in seconds without losing
-accuracy:
+`azure-cloud` counts via **Azure Resource Graph (ARG) by default** — a fast,
+server-side path — and offers `--authoritative` for the full live SDK
+enumeration when you need counts byte-identical to the legacy scripts.
 
-1. **Preliminary estimate (Azure Resource Graph).** A handful of cross-subscription
-   KQL queries count the whole tenant in seconds and print a labelled estimate.
-   Types ARG can't reach (storage containers, ACR images) show as `pending`.
-2. **Detailed scan (authoritative).** The full SDK counting logic runs, now
-   parallelized **across** subscriptions (bounded by `--max-workers`), and writes
-   the final `azure-resources.csv`. These counts are the source of truth and are
-   byte-identical to the previous behavior.
+```bash
+python3 wiz-azure.py cloud --all                  # fast Resource Graph path (default)
+python3 wiz-azure.py cloud --all --authoritative  # full live SDK scan (byte-identical to legacy)
+```
 
-#### Why the estimate is fast
+#### Why the default is fast
 
-The detailed scan fans out **live ARM REST calls** — for every subscription it
+The live SDK scan fans out **live ARM REST calls** — for every subscription it
 lists each of ~11 resource types, paginating, and several counts are N+1 (scale
-sets → their VMs, SQL servers → their databases, web apps → their child
-functions, AKS → its agent pools). That's thousands of throttled, full-payload
-calls counted client-side, scaling with subscription count.
+sets → their VMs, SQL servers → their databases, AKS → its agent pools). That's
+thousands of throttled, full-payload calls counted client-side, scaling with
+subscription count.
 
-Azure Resource Graph inverts this:
+Azure Resource Graph inverts most of that:
 
-- **One query spans the whole tenant**, independent of how many subscriptions
-  there are — a handful of queries instead of thousands of calls.
 - **Server-side aggregation** — `summarize count()` runs inside ARG, so only the
   final number crosses the network (the SDK ships every resource's full JSON).
 - **It reads a pre-built index** — ARG is a continuously-updated, Kusto-indexed
   replica of ARM metadata, so there are no N+1 drill-downs and no rate-limit
-  backoff. Reading an index beats live provider fan-out.
+  backoff for the counts it can serve.
+- **No live scale-set walk** — the biggest N+1 (enumerating every VM in every
+  scale set) collapses to a single `sku.capacity` aggregation.
 
-#### Why the estimate is slightly off
+Queries are issued per subscription (not one tenant-wide query), so wall-clock
+still scales with subscription count — but each subscription is a handful of
+aggregations instead of thousands of paginated calls.
 
-Approximation is the tradeoff that buys the speed; the detailed pass corrects it:
+#### What each mode counts
 
-- **Scale Sets** — ARG reads `sku.capacity` (configured count), not live
-  instances; autoscale / spot eviction / in-flight scaling make these differ
-  (the largest source of drift).
-- **Storage containers & ACR images** — sub-resource / data-plane objects ARG
-  can't see, so they show as `pending` until the detailed pass counts them.
-- **Functions** — ARG counts function *apps* but not the individual functions
-  inside them, so it can read slightly low.
-- **Index freshness** — ARG lags ARM by seconds-to-minutes, so very recent
-  changes may not appear yet.
-- **Exclusion rules** (Databricks tags, SQL `master`) are fully applied only in
-  the SDK pass.
+| Resource type | Fast (default) | `--authoritative` |
+|---|---|---|
+| VMs (+ non-OS disks), AKS hosts, SQL databases | Resource Graph | live SDK |
+| VM Scale Sets | Resource Graph (`sku.capacity`) | live per-instance walk |
+| Web Apps **and child functions** | **live SDK (always)** | live SDK |
+| Container Instances, Container Apps, Arc, Stack HCI | live SDK (cheap single list) | live SDK |
+| Storage containers (`--data`), ACR images (`--images`) | live SDK (data plane) | live SDK |
 
-The detailed scan is authoritative and always overrides the estimate, so the
-final CSV has zero drift versus the original method.
+Web Apps and the data-plane types are enumerated live in **both** modes — ARG
+can count web *apps* but not the individual functions inside them, and it cannot
+see storage containers or registry images at all. Keeping those live avoids
+under-counting.
 
-Flags:
+#### Where the fast path can differ (and why it errs high)
 
-```bash
-python3 wiz-azure.py cloud --all               # estimate, then authoritative scan (default)
-python3 wiz-azure.py cloud --all --quick        # estimate only (fastest, approximate)
-python3 wiz-azure.py cloud --all --no-preview   # skip the estimate, scan directly
-```
+Sizing wants to be over rather than under, and the ARG approximations lean that
+way:
 
-`--max-workers` is now a single global cap across all subscriptions × resource
-types. `--graph` is a deprecated alias for `--quick`.
+- **Scale Sets** — ARG reads `sku.capacity` (configured/desired count), not live
+  instances. Under autoscale / spot eviction this is typically **≥** the running
+  count, so it over-counts slightly — useful headroom for sizing. Use
+  `--authoritative` for the exact live count.
+- **Index freshness** — ARG lags ARM by seconds-to-minutes, so very recently
+  created/deleted resources may be off by a hair in either direction.
+- **Exclusion rules** — Databricks-tagged resources and the SQL `master`
+  database are filtered in both paths; the fast path applies the Databricks
+  filter at the scale-set level rather than per instance.
+
+`--authoritative` reproduces the original method exactly. Because neither path
+can be diffed off-box, validate a release by running both against the same live
+tenant scope and byte-diffing the CSVs (see the operator checklist below).
+
+`--max-workers` is a single global cap across all subscriptions × resource
+types. `--graph` is accepted as a deprecated no-op (Resource Graph counting is
+now the default).
 
 ## Credentials
 
@@ -182,7 +192,9 @@ Each mode writes the same CSV file(s) it always has:
 
 The scanning logic is the original standalone sizing scripts, **embedded
 verbatim and run in-process**, so the CSV output is byte-identical to running
-those scripts directly.
+those scripts directly. The one exception is the `azure-cloud` default, which
+uses the faster Resource Graph path described above; run it with
+`--authoritative` to reproduce the legacy counts exactly.
 
 ## Repository layout
 

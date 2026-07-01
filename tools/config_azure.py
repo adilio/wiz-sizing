@@ -15,11 +15,14 @@ One-line bootstrap (Azure Cloud Shell):
 Run with no arguments for the interactive menu, or:
   python3 wiz-azure.py --list
   python3 wiz-azure.py cloud --dry-run
-  python3 wiz-azure.py cloud --all --quick
+  python3 wiz-azure.py cloud --all
+  python3 wiz-azure.py cloud --all --authoritative
   python3 wiz-azure.py recommended
 
-The cloud scanning logic is the original standalone sizing scripts, embedded
-verbatim and run in-process, so the CSV output is byte-identical to those.
+The Azure Cloud count defaults to a fast Azure Resource Graph path; pass
+--authoritative for the full live SDK enumeration (byte-identical to the legacy
+scripts). All other modes run their original standalone script verbatim and
+in-process, so their CSV output is byte-identical to those.
 """
 
 FILE_TITLE = "Wiz Sizing — Azure"
@@ -52,12 +55,8 @@ MODES = [
              "help": "Limit to specific subscription IDs (comma/space list → subscriptions.txt)"},
             {"flag": "--output-dir", "kind": "path", "advanced": False, "default": ".",
              "help": "Directory for the output CSV"},
-            {"flag": "--quick", "kind": "toggle", "advanced": False,
-             "help": "Fast Resource Graph estimate only — skip the detailed scan (approximate)"},
-            {"flag": "--no-preview", "kind": "toggle", "advanced": True,
-             "help": "Skip the Resource Graph preview; run the detailed scan directly"},
-            {"flag": "--graph", "kind": "toggle", "advanced": True,
-             "help": "Deprecated alias for --quick"},
+            {"flag": "--authoritative", "kind": "toggle", "advanced": False,
+             "help": "Full live SDK enumeration — slower, byte-identical to legacy counts (default is the fast Resource Graph path)"},
             {"flag": "--id", "kind": "str", "advanced": True,
              "help": "Scan only this single subscription ID"},
             {"flag": "--gov", "kind": "toggle", "advanced": True},

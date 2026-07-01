@@ -65,10 +65,10 @@ class TestParseSet(unittest.TestCase):
 
     def test_toggle_on_off_and_bare(self):
         v = self.m._parse_set_values(self.cloud,
-                                     ["--all=on", "--data=off", "--graph"])
+                                     ["--all=on", "--data=off", "--authoritative"])
         self.assertIs(v["--all"], True)
         self.assertIs(v["--data"], False)
-        self.assertIs(v["--graph"], True)
+        self.assertIs(v["--authoritative"], True)
 
     def test_value_options(self):
         v = self.m._parse_set_values(self.cloud, ["--id=sub-9"])
