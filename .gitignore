@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# wiz-sizing
+#   The legacy sizing-scripts/ tree lives only in git history; it is restored
+#   transiently (git checkout <ref> -- ...) to edit a scanner, then re-embedded
+#   into the wiz-*.py blobs by tools/build_wiz.py. Keep it out of commits so the
+#   embedded blob stays the single source of truth.
+sizing-scripts/
