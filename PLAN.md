@@ -1,6 +1,10 @@
 # Wiz Sizing — Bash-per-CSP Rewrite Plan
 
-> **Status: PLANNED.** This supersedes the earlier Python single-file-per-CSP
+> **Status: STRUCTURALLY COMPLETE (2026-07-12).** All four bash scripts ship
+> and pass the no-creds gates; `parity/mapping.md` is complete for every CSP;
+> the live parity diff (and the Python retirement it gates) remains open
+> pending a reference environment — the expected §17 end-state.
+> Originally: This supersedes the earlier Python single-file-per-CSP
 > design (now in git history). The product is now **one curl-able bash script per
 > cloud** (Azure/AWS/GCP), hitting REST APIs / cloud CLIs directly with the user's
 > existing shell session — no Python modules, no Az/Graph modules. The one
@@ -364,47 +368,47 @@ something demands it — the configured/desired count is the accepted default.
 ## 14. Phased implementation checklist
 
 **Phase 0 — repo prep**
-- [ ] Move `sizing-scripts/` → `reference/`; stub `wiz-tools`.
-- [ ] `tests/contract.bats` + `tests/smoke.bats`; wire `shellcheck` as a lint gate; CI runs all three (no creds).
-- [ ] `parity/mapping.md` skeleton + `parity/diff.sh` scaffold.
-- [ ] **Done when:** `reference/` populated, wiz-tools sizing stub in place, CI green (`shellcheck` + both `.bats` suites) with no cloud session.
+- [x] Move `sizing-scripts/` → `reference/`; stub `wiz-tools`.
+- [x] `tests/contract.bats` + `tests/smoke.bats`; wire `shellcheck` as a lint gate; CI runs all three (no creds).
+- [x] `parity/mapping.md` skeleton + `parity/diff.sh` scaffold.
+- [x] **Done when:** `reference/` populated, wiz-tools sizing stub in place, CI green (`shellcheck` + both `.bats` suites) with no cloud session.
 
 **Phase 1 — `wiz-azure.sh` (the template)**
-- [ ] Management-token acquisition + per-audience refresh helper.
-- [ ] Accurate cloud count via ARG REST + live drill-downs (VMSS, functions,
+- [x] Management-token acquisition + per-audience refresh helper.
+- [x] Accurate cloud count via ARG REST + live drill-downs (VMSS, functions,
       `--data` containers, `--images` ACR).
-- [ ] Defend ingest via Log Analytics KQL over `api.loganalytics.io`.
-- [ ] `--fast` mode + deviation notes (D3–D5).
-- [ ] Incremental write, `--resume`, signal trap, progress UX, summary block.
-- [ ] AzDO opt-in (prompt-if-detected + `--azdo`, DevOps audience).
-- [ ] M365 opt-in: promote hardened `365_Sizing_Script.ps1` → `wiz-365.ps1`;
+- [x] Defend ingest via Log Analytics KQL over `api.loganalytics.io`.
+- [x] `--fast` mode + deviation notes (D3–D5).
+- [x] Incremental write, `--resume`, signal trap, progress UX, summary block.
+- [x] AzDO opt-in (prompt-if-detected + `--azdo`, DevOps audience).
+- [x] M365 opt-in: promote hardened `365_Sizing_Script.ps1` → `wiz-365.ps1`;
       `wiz-azure.sh --m365` hands off via `pwsh` (else prints the one-liner).
-- [ ] Parity map filled for Azure; retire `wiz-azure.py` after parity.
-- [ ] **Done when:** `wiz-azure.sh` passes `shellcheck` + contract + smoke; `--dry-run` prints the intended calls with no `az` session; `cloud` / `defend` / `all` / `--fast` / `--resume` / `--azdo` / `--m365` all parse and dry-run; the Azure section of `parity/mapping.md` is complete. (Live parity diff + Python retirement are gated per §3, not part of this DoD.)
+- [x] Parity map filled for Azure. *(Python retirement stays gated on the §3 live diff — `wiz-azure.py` retained, awaiting live parity.)*
+- [x] **Done when:** `wiz-azure.sh` passes `shellcheck` + contract + smoke; `--dry-run` prints the intended calls with no `az` session; `cloud` / `defend` / `all` / `--fast` / `--resume` / `--azdo` / `--m365` all parse and dry-run; the Azure section of `parity/mapping.md` is complete. (Live parity diff + Python retirement are gated per §3, not part of this DoD.)
 
 **Phase 2 — `wiz-aws.sh`**
-- [ ] `aws` CLI accurate count; org via `organizations` + `sts assume-role`.
-- [ ] Defend ingest: auto-discover CloudTrail/VPC/R53 buckets, CloudWatch metrics,
+- [x] `aws` CLI accurate count; org via `organizations` + `sts assume-role`.
+- [x] Defend ingest: auto-discover CloudTrail/VPC/R53 buckets, CloudWatch metrics,
       optional `--defend-detailed` S3 sampling.
-- [ ] `--fast` via Resource Explorer w/ fallback; deviations D1, D6.
-- [ ] Same UX/resume/progress; parity map; retire `wiz-aws.py`.
-- [ ] **Done when:** `wiz-aws.sh` passes the gates and dry-runs every documented mode/flag with no `aws` session; org assume-role + Defend auto-discovery paths dry-run; AWS section of `parity/mapping.md` complete.
+- [x] `--fast` via Resource Explorer w/ fallback; deviations D1, D6.
+- [x] Same UX/resume/progress; parity map. *(`wiz-aws.py` retained, awaiting live parity per §3.)*
+- [x] **Done when:** `wiz-aws.sh` passes the gates and dry-runs every documented mode/flag with no `aws` session; org assume-role + Defend auto-discovery paths dry-run; AWS section of `parity/mapping.md` complete.
 
 **Phase 3 — `wiz-gcp.sh`**
-- [ ] REST accurate count; org project enumeration.
-- [ ] Defend ingest via Monitoring `byte_count` / sink metrics.
-- [ ] `--fast` via Cloud Asset Inventory w/ fallback; deviations D2, D6.
-- [ ] Same UX/resume/progress; parity map; retire `wiz-gcp.py`.
-- [ ] **Done when:** `wiz-gcp.sh` passes the gates and dry-runs every documented mode/flag with no `gcloud` session; org project enumeration + CAI fast path dry-run; GCP section of `parity/mapping.md` complete.
+- [x] REST accurate count; org project enumeration.
+- [x] Defend ingest via Monitoring `byte_count` / sink metrics.
+- [x] `--fast` via Cloud Asset Inventory w/ fallback; deviations D2, D6.
+- [x] Same UX/resume/progress; parity map. *(`wiz-gcp.py` retained, awaiting live parity per §3.)*
+- [x] **Done when:** `wiz-gcp.sh` passes the gates and dry-runs every documented mode/flag with no `gcloud` session; org project enumeration + CAI fast path dry-run; GCP section of `parity/mapping.md` complete.
 
 **Phase 4 — `wiz-code.sh`**
-- [ ] GitHub / GitLab / HCP active-developer counts, masked tokens, opt-in domain.
-- [ ] **Done when:** `wiz-code.sh` passes the gates, prompts masked tokens (reusing `GITHUB_TOKEN`/`GITLAB_TOKEN`/`HCP_TOKEN`), and dry-runs all three with no token.
+- [x] GitHub / GitLab / HCP active-developer counts, masked tokens, opt-in domain.
+- [x] **Done when:** `wiz-code.sh` passes the gates, prompts masked tokens (reusing `GITHUB_TOKEN`/`GITLAB_TOKEN`/`HCP_TOKEN`), and dry-runs all three with no token.
 
 **Phase 5 — finalize**
-- [ ] Rewrite README; remove `tools/` + remaining Python; confirm `wiz-tools` stub.
-- [ ] Wire `parity/diff.sh` to the first reference env when available.
-- [ ] **Done when:** README is the single authoritative doc; for each CSP that cleared its §3 live gate, `tools/` + that Python entrypoint are removed (others retained with an "awaiting live parity" note); wiz-tools sizing stub confirmed; `parity/diff.sh` wired to a reference env if one exists.
+- [x] Rewrite README; confirm `wiz-tools` stub. *(Removal of `tools/` + the Python entrypoints is gated per §3 — no CSP has a live parity pass yet, so all are retained with the "awaiting live parity" note in README.)*
+- [ ] Wire `parity/diff.sh` to the first reference env when available. *(Open: no reference env exists yet — the expected §17 end-state.)*
+- [x] **Done when:** README is the single authoritative doc; for each CSP that cleared its §3 live gate, `tools/` + that Python entrypoint are removed (others retained with an "awaiting live parity" note); wiz-tools sizing stub confirmed; `parity/diff.sh` wired to a reference env if one exists.
 
 ## 15. Assumptions & resolved decisions
 
