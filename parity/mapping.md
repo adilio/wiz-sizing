@@ -142,10 +142,55 @@ in the index — all D6.
 
 ## GCP — `wiz-gcp.sh`
 
-*Pending — filled in Phase 3.*
+Oracle: `reference/cloud/gcp/resource-count-gcp-v2.py` ("gcp-v2"),
+`reference/defend/gcp/log-volume-estimation-gcp.py` ("defend-gcp").
 
-| Count (CSV row) | Official | Ours | Deviation |
+Scope notes: default = every ACTIVE listable project sorted by ID, exactly the
+official `--all` path (gcp-v2:518-555; the official's interactive default
+prompts for one project). `--projects` ≙ official `--projects` + projects.txt
+(names via `projects.get`). Each domain is gated on the project's ENABLED
+services from serviceusage, same list and skip message (gcp-v2:463-485,
+1004-1009).
+
+### Cloud, accurate mode (default)
+
+| Count (CSV row) | Official | Ours (`wiz-gcp.sh` fn → call + jq) | Deviation |
 |---|---|---|---|
+| Virtual Machines [Compute] | gcp-v2:598-658 — `instances.aggregatedList`; skip label key `databricks` (label_in_labels) and the no-op `tags.get('Vendor')` check; **GKE nodes count here too** (increment precedes the label check) | `scan_project_accurate` — same aggregatedList REST, same skips, same GKE-nodes-included total | — (oracle quirks reproduced) |
+| Container Hosts [GKE] | gcp-v2:631-636,660-663 — instances with label key `goog-gke-node`; live, not configured | same label test on the same call | — |
+| Non-OS Disks | gcp-v2:638-650 — non-boot disks of non-GKE instances only; **only displayed with `--data`** but always accumulated | same rule; summary line gated on `--data` like the oracle | — |
+| Virtual Machine Sensors | gcp-v2:641-648,666-686 — per boot disk: `disks.get` → `sourceImage` → `images.get`; linux unless description/family contains 'win' (UNKNOWN → linux); image cache | same walk over REST with the same cache and UNKNOWN default | — |
+| Kubernetes Sensors / Serverless Containers [GKE Autopilot] | gcp-v2:752-789 — autopilot clusters only: `currentNodeCount // initialNodeCount` per pool → sensors; × `maxPodsPerNode` → serverless containers | `container.googleapis.com/v1/projects/{p}/locations/-/clusters`, same jq | — |
+| Serverless Functions [Cloud Functions] | gcp-v2:692-715 — cloudfunctions v2 list, all locations | same REST list, `jq length` | — |
+| Serverless Containers [Cloud Run Revisions] | gcp-v2:721-747 — run v1 revisions labelSelector `revisionStatus=active`; count conditions type=ContainerHealthy status=True | same endpoint + labelSelector + condition count | — |
+| Data Buckets (`--data`) | gcp-v2:856-880 — storage v1 buckets list, cap 10000 | same, cap applied | — |
+| PaaS Databases (`--data`) | gcp-v2:886-962 — Cloud SQL instances + Spanner databases per instance | same two REST walks | — |
+| Data Warehouses (`--data`) | gcp-v2:968-991 — BigQuery datasets list | same | — |
+| Registry Container Images (`--images`) | gcp-v2:797-848 — per compute region: DOCKER repositories → dockerImages: min(max_image_tags, tags) or 1 if untagged; cap 10000/repo | same walk (regions from `compute.regions.list` like the oracle), same clamps | — |
+
+### Cloud, `--fast` (Cloud Asset Inventory; PLAN §7, D2/D6)
+
+The official GCP script has no fast mode — it prints CAI *instructions*
+(gcp-v2:407-427). Ours automates that suggestion: `searchAllResources` per
+asset type (Instance split into VMs/GKE via `labels.goog-gke-node:*`,
+CloudFunction, Revision, Bucket, sqladmin Instance, spanner Instance,
+Dataset), org-scope in one sweep when `--org` is given, per-project fallback
+to the accurate path when the CAI API is not enabled. Deviations: index
+lag/coverage (D6), Cloud Run counts all revisions not only active ones,
+Spanner counts instances not databases, Autopilot serverless containers and
+registry images stay pending (D2/D5-style, reported as pending not zero).
+
+### Defend (Cloud Monitoring byte_count)
+
+| Piece | Official (defend-gcp) | Ours | Deviation |
+|---|---|---|---|
+| Project set | 318-348 — `--project-id`, `--organization-id`, or auto-detect | the run's project scope (same enumeration as cloud mode) | — (superset default: all listable projects) |
+| Estimation query | 407-448 — `byte_count` filtered to cloudaudit activity+data_access, ALIGN_RATE 3600s + REDUCE_SUM by (log, resource.type) | `monitoring_series` — same filter/aggregation via REST query params | — |
+| Volume math | 432-438 — Σ(rate×3600)/points × 24 → daily bytes → GB × 30 | same formula in jq (`JQ_SERIES_GB`), verified numerically | — |
+| Workspace slice | 552-556 — activity AND resource.type=audited_resource | same second query | — (incl. the oracle's per-project double-count of audited_resource in both buckets) |
+| Exclusion ratios | 136-146, 483-517 — gke_audit: k8s_cluster 0.14 / gke_cluster 0.12; data_access non-storage: cloud_function 0.20 / gce_instance 0.10 / default 0.14; `--no-exclusion-adjustment` disables | same table + flag | — |
+| Sink measurement | 350-405 — sinks with 'wiz' in name/destination; `exports/byte_count` per sink, ALIGN_RATE no reducer | `--use-sink-metrics` / `--sink-name`, same discovery + query | — |
+| CSV | 615-629 — `gcp-defend-log-volume-<ts>.csv`, `GCP Monitoring Metrics` rows, `Project: <id>`, `%.2f`, volume-desc sort | identical | — |
 
 ## Code — `wiz-code.sh`
 
