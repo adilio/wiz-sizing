@@ -1,10 +1,10 @@
 # Wiz Sizing — Bash-per-CSP Rewrite Plan
 
-> **Status: STRUCTURALLY COMPLETE (2026-07-12).** All four bash scripts ship
-> and pass the no-creds gates; `parity/mapping.md` is complete for every CSP;
-> the live parity diff (and the Python retirement it gates) remains open
-> pending a reference environment — the expected §17 end-state.
-> Originally: This supersedes the earlier Python single-file-per-CSP
+> **Status: STRUCTURALLY COMPLETE (2026-07-12).** All six phases (§14) ran to
+> the §17 Definition of Done in one autonomous session. Details in the
+> implementation report below.
+>
+> Original preamble: This supersedes the earlier Python single-file-per-CSP
 > design (now in git history). The product is now **one curl-able bash script per
 > cloud** (Azure/AWS/GCP), hitting REST APIs / cloud CLIs directly with the user's
 > existing shell session — no Python modules, no Az/Graph modules. The one
@@ -16,6 +16,74 @@
 > **Implementing this plan?** Read **§16 (Execution protocol)** and **§17
 > (Definition of Done)** first, then work §14 Phase 0 → 5 without stopping between
 > phases — run to §17, don't pause for approval you don't need.
+
+## Implementation report (2026-07-12)
+
+### What shipped
+
+All four bash entrypoints, built Phase 0 → 5 per §14, each reproducing its
+official script's counting rules and exact CSV filenames/headers:
+
+- **`wiz-azure.sh`** — ARM REST + Resource Graph cloud counting (live VMSS /
+  child-function / `--data` / `--images` drill-downs); Defend via Log
+  Analytics KQL with workspace discovery through tenant (Entra),
+  management-group and subscription diagnostic settings; AzDO opt-in with the
+  30s default-skip prompt; `--m365` hand-off to `wiz-365.ps1` (promoted
+  verbatim — byte-identical to the hardened reference).
+- **`wiz-aws.sh`** — per account×region CLI counting; `--org` via
+  `organizations` + `sts assume-role` with sessions re-assumed near expiry;
+  Defend **auto-discovers** CloudTrail/VPC-flow/R53 buckets (R2), basic
+  CloudWatch estimation by default, full `--defend-detailed` S3-sampling port.
+- **`wiz-gcp.sh`** — REST counting gated on each project's enabled services;
+  Defend via Monitoring `byte_count` (ALIGN_RATE formula, exclusion ratios,
+  `--use-sink-metrics`); `--fast` automates the official's own CAI guidance,
+  org-scope in one sweep with `--org`.
+- **`wiz-code.sh`** — GitHub / GitLab / HCP Terraform developer counts, masked
+  token prompts reusing `*_TOKEN` env vars, sha256-hashed outputs.
+
+Shared plumbing per §6/§11/§12 in all four: per-audience token refresh,
+per-scope temp files merged by a single writer, `--resume`, INT/TERM partial
+output, `--max-parallel`, stderr progress, error rollups, and a `--dry-run`
+that provably makes zero cloud calls.
+
+### Verification
+
+- No-creds gates: `shellcheck` clean; **all 20 bats tests pass with zero
+  skips** (contract + smoke, cloud CLIs stubbed to `exit 127`); the python
+  safety-net suite and `parity/diff.sh --stub` also pass. CI runs all of it.
+- Every counting path was additionally **mock-tested end-to-end** against
+  fake APIs (canned ARM/ARG/Log Analytics/DevOps, aws CLI, GCP REST,
+  GitHub/GitLab/HCP responses) with hand-computed expected counts — all
+  matched, including Defend volume math verified to the cent.
+- `parity/mapping.md` is complete for every CSP: per-count citations,
+  official source line → bash call + `jq` reduction.
+
+### Notable findings (ledger updated)
+
+- **D1 shrank:** the official EKS *node* count is EC2-tag-based
+  (`kubernetes.io/cluster/<name>`), so bash matches it exactly; only Fargate
+  pods use the official's own 1-per-cluster error fallback.
+- **D2 shrank:** the official GKE node count reads live `goog-gke-node`
+  instance labels (not the k8s API); accurate mode matches exactly — D2 now
+  applies to `--fast` only.
+- **Upstream bug fixed:** the official AWS Defend detailed mode drops S3 Data
+  event volume via a category-name mismatch (`Data (S3)` vs `Storage (S3)`);
+  our port populates the Storage row (bias-high, documented in the mapping).
+- Mock-testing caught two real bash pitfalls before ship: `set -u` +
+  empty `local -A` arrays (bash 5.2+), and consecutive-tab field collapse in
+  `IFS=$'\t' read`.
+
+### Where things stand
+
+- **Branches:** the six phase commits are on **`origin/bash-rewrite`**
+  (wiz-sizing) and the sizing stub on **`origin/sizing-stub`** (wiz-tools) —
+  direct pushes to `main` were blocked by the session's permission policy, so
+  merging is a one-step manual action (local `main` is already ahead;
+  `git push origin main` or open PRs).
+- **The one open item** (expected §17 end-state): the **live parity diff**
+  per CSP needs a real tenant/account. Until each CSP passes
+  `parity/diff.sh`, its `wiz-<csp>.py` + `tools/` stay in-tree as the safety
+  net, noted in README. Everything else in §14/§17 is ticked.
 
 ---
 
