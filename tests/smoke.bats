@@ -22,13 +22,13 @@ setup() {
 # --dry-run (default mode) must exit 0 and print the calls it would make.
 # The no-arg interactive menu must render and exit cleanly on 'q'.
 
-check_help()   { run bash "$ROOT/$1" --help;  [ "$status" -eq 0 ]; [[ "$output" == *Usage* || "$output" == *USAGE* ]]; }
-check_list()   { run bash "$ROOT/$1" --list;  [ "$status" -eq 0 ]; [ -n "$output" ]; }
-check_menu()   { run bash "$ROOT/$1" <<< "q"; [ "$status" -eq 0 ]; }
+check_help()   { run "${BASH:-bash}" "$ROOT/$1" --help;  [ "$status" -eq 0 ]; [[ "$output" == *Usage* || "$output" == *USAGE* ]]; }
+check_list()   { run "${BASH:-bash}" "$ROOT/$1" --list;  [ "$status" -eq 0 ]; [ -n "$output" ]; }
+check_menu()   { run "${BASH:-bash}" "$ROOT/$1" <<< "q"; [ "$status" -eq 0 ]; }
 
 check_dry_run() { # $1 = script, rest = args; asserts exit 0 + mentions dry run
   local script="$1"; shift
-  run bash "$ROOT/$script" "$@" --dry-run
+  run "${BASH:-bash}" "$ROOT/$script" "$@" --dry-run
   if [ "$status" -ne 0 ]; then
     echo "--- $script $* --dry-run failed ($status) ---" >&2
     echo "$output" >&2
@@ -62,7 +62,7 @@ check_dry_run() { # $1 = script, rest = args; asserts exit 0 + mentions dry run
 
 @test "wiz-azure.sh rejects unknown flags" {
   [ -f "$ROOT/wiz-azure.sh" ] || skip "not built yet"
-  run bash "$ROOT/wiz-azure.sh" --no-such-flag
+  run "${BASH:-bash}" "$ROOT/wiz-azure.sh" --no-such-flag
   [ "$status" -ne 0 ]
 }
 
@@ -92,7 +92,7 @@ check_dry_run() { # $1 = script, rest = args; asserts exit 0 + mentions dry run
 
 @test "wiz-aws.sh rejects unknown flags" {
   [ -f "$ROOT/wiz-aws.sh" ] || skip "not built yet"
-  run bash "$ROOT/wiz-aws.sh" --no-such-flag
+  run "${BASH:-bash}" "$ROOT/wiz-aws.sh" --no-such-flag
   [ "$status" -ne 0 ]
 }
 
@@ -120,7 +120,7 @@ check_dry_run() { # $1 = script, rest = args; asserts exit 0 + mentions dry run
 
 @test "wiz-gcp.sh rejects unknown flags" {
   [ -f "$ROOT/wiz-gcp.sh" ] || skip "not built yet"
-  run bash "$ROOT/wiz-gcp.sh" --no-such-flag
+  run "${BASH:-bash}" "$ROOT/wiz-gcp.sh" --no-such-flag
   [ "$status" -ne 0 ]
 }
 
@@ -144,7 +144,7 @@ check_dry_run() { # $1 = script, rest = args; asserts exit 0 + mentions dry run
 
 @test "wiz-code.sh rejects unknown flags" {
   [ -f "$ROOT/wiz-code.sh" ] || skip "not built yet"
-  run bash "$ROOT/wiz-code.sh" --no-such-flag
+  run "${BASH:-bash}" "$ROOT/wiz-code.sh" --no-such-flag
   [ "$status" -ne 0 ]
 }
 

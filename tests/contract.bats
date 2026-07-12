@@ -20,7 +20,7 @@ setup() {
 }
 
 contract() { # $1 = script
-  run bash "$ROOT/$1" --print-csv-contract
+  run "${BASH:-bash}" "$ROOT/$1" --print-csv-contract
   [ "$status" -eq 0 ]
 }
 
