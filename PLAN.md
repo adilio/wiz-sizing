@@ -273,7 +273,7 @@ require one, plus a scaffold to plug reference envs in later.
 
 | # | Count | Mode | Deviation | Direction | Why |
 |---|---|---|---|---|---|
-| D1 | EKS container hosts (nodes) | **both** | Official counts live nodes via the k8s API (eks_token + kubernetes). Bash uses nodegroup `desiredSize` + self-managed ASG capacity. (ECS nodes are unaffected — `ecs list-container-instances` is plain CLI in both.) | ≈ / slightly high | k8s API auth in pure bash needs extra tooling; the constraint is stdlib-shell only. **Most prominent caveat.** |
+| D1 | EKS Fargate pods (Serverless Containers) | **both** | *(Revised during Phase 2 — smaller than planned.)* EKS **nodes** turn out to be exactly reproducible: the official counts EC2 instances tagged `kubernetes.io/cluster/<name>`, not live k8s nodes, so bash matches it 1:1 (the earlier desiredSize approximation was unnecessary). Only the **Fargate pod count** used the k8s API (eks_token + kubernetes), with a documented fallback of **1 per cluster with Fargate profiles** on any error; bash always uses that fallback. | under (when Fargate clusters run >1 pod) | k8s API auth in pure bash needs extra tooling; the official's own error path defines the fallback. |
 | D2 | GKE container hosts | **both** | Node-pool configured size / autoscaler target vs live node count. | ≥ live | REST-derivable; avoids per-cluster k8s calls. |
 | D3 | Azure VMSS instances | `--fast` only | `sku.capacity` (configured) vs live instances. Accurate mode enumerates live. | ≥ live under autoscale | The N+1 the fast path is built to skip. |
 | D4 | Azure child functions | `--fast` only | ARG counts web *sites*, not functions inside them. Accurate mode enumerates. | under | ARG can't see child functions. |

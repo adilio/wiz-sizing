@@ -87,10 +87,58 @@ Not carried over from the oracle: `--china/--germany/--gov` cloud endpoints
 
 ## AWS — `wiz-aws.sh`
 
-*Pending — filled in Phase 2.*
+Oracle: `reference/cloud/aws/resource-count-aws-v2.py` ("aws-v2"),
+`reference/defend/aws/log-volume-estimation-aws.py` ("defend-aws").
 
-| Count (CSV row) | Official | Ours | Deviation |
+Scope notes: account set matches the official (`--org` ≙ official `--all`:
+ACTIVE org accounts via `organizations list-accounts` + `sts assume-role
+role/<--role-name>`, default `OrganizationAccountAccessRole`, aws-v2:386-497;
+default = current account ≙ official prompt-less single account;
+`--accounts-file` ≙ official `--accounts` + accounts.txt with the same
+12-digit validation). Regions via `ec2 describe-regions --no-all-regions`
+sorted (aws-v2:500-512); Lightsail region subset via `lightsail get-regions`
+(aws-v2:515-527). Pagination: the official loops NextToken/Marker manually;
+AWS CLI v2 auto-paginates the same APIs, so counts are equivalent.
+
+### Cloud, accurate mode (default)
+
+| Count (CSV row) | Official | Ours (`wiz-aws.sh` fn → call + jq) | Deviation |
 |---|---|---|---|
+| Virtual Machines [EC2] | aws-v2:574-624 — describe_instances, skip terminated + tag Vendor=Databricks | `scan_account_region` — `aws ec2 describe-instances`, same jq filters | — |
+| Non-OS Disks (EC2) | aws-v2:627-636 — mappings whose `Ebs.VolumeId` ≠ first mapping's | same rule in jq (`$m[0].Ebs.VolumeId` as root) | — |
+| Virtual Machine Sensors (EC2) | aws-v2:597 — `instance.get('platform') == 'LINUX_UNIX'`; the real key is `Platform` (windows-only), so this is always 0 | same lowercase `.platform` probe — reproduces the oracle's always-0 behavior byte-for-byte | — (oracle quirk, reproduced) |
+| Virtual Machines [Lightsail] + disks + sensors | aws-v2:642-699 — `get_instances`, resourceType Instance, skip terminated; disks: not system, attached; `platform == LINUX_UNIX` | `aws lightsail get-instances` in Lightsail regions only, same jq | — |
+| Container Hosts [ECS] | aws-v2:705-745 — container instances per cluster | `aws ecs list-clusters` + `list-container-instances` per cluster | — |
+| Container Hosts [EKS] | aws-v2:751-801 — EC2 instances tagged `kubernetes.io/cluster/<name>`, skip terminated | `aws ec2 describe-instances --filters Name=tag-key,Values=kubernetes.io/cluster/<name>` per cluster — **exact**, no k8s API involved | — |
+| Serverless Containers [EKS Fargate] | aws-v2:803-859 — k8s API pod count; **on any auth/API error the official returns 1 per Fargate-profile cluster** | always the official fallback: `aws eks list-fargate-profiles` → +1 per cluster with profiles | **D1** (under when >1 pod) |
+| Serverless Functions [Lambda] | aws-v2:865-913 — functions + min(max_lambda_versions, versions excl. $LATEST) per function, default 5 | `aws lambda list-functions` + `list-versions-by-function --max-items N`, same clamp | — |
+| Serverless Containers [ECS Fargate] + Sensors | aws-v2:919-968 — containers in FARGATE tasks; sensors = task count | `aws ecs list-tasks --launch-type FARGATE` + `describe-tasks` (batched ≤100), same sums | — |
+| Serverless Containers [SageMaker] | aws-v2:974-1024 — domains + endpoints counts | `aws sagemaker list-domains` / `list-endpoints` | — |
+| Data Buckets (`--data`) | aws-v2:1079-1101 — `list_buckets` count, cap 10000, global control plane | `aws s3api list-buckets`, same cap, once per account | — |
+| PaaS Databases (`--data`) | aws-v2:1107-1219 — DocumentDB clusters; RDS clusters filtered to aurora-mysql/aurora-postgresql; RDS instances filtered to the 11-engine list; Redshift clusters | same four calls with identical `--filters` engine lists | — |
+| Data Warehouses (`--data`) | aws-v2:1227-1249 — DynamoDB table names, cap 10000 | `aws dynamodb list-tables`, same cap | — |
+| Registry Container Images (`--images`) | aws-v2:1033-1071 — min(max_image_tags, imageIds)/repository, default 5 | `aws ecr describe-repositories` + `list-images`, same clamp | — |
+
+### Cloud, `--fast` (Resource Explorer; PLAN §7, D6)
+
+The official AWS script has no fast mode; ours uses `aws resource-explorer-2
+search --query-string "resourcetype:..."` `Count.TotalResources` for the
+index-visible dimensions (ec2:instance, lambda:function, s3:bucket, rds:db +
+rds:cluster, dynamodb:table). Container hosts and serverless containers are
+never index-visible as node/container counts and always run the accurate
+calls; if the index/view is absent the whole account falls back to accurate
+(never zero). No Databricks exclusion, non-OS disk math, or Lambda versions
+in the index — all D6.
+
+### Defend (auto-discovery + CloudWatch metrics)
+
+| Piece | Official (defend-aws) | Ours | Deviation |
+|---|---|---|---|
+| Source selection | flags only (`--defend-*-logs-bucket`), exits when none given (974-985) | **auto-discovers** trails (`cloudtrail describe-trails` → S3 bucket/prefix), VPC flow logs (`ec2 describe-flow-logs`, s3 destinations) and R53 resolver configs per region; flags override/supplement; zero sources = note + continue (PLAN R2) | — (superset; per-bucket math identical) |
+| Basic estimation | 372-508 — bucket region; CloudWatch AWS/S3 `IncomingBytes` Sum over 30d (FilterId=EntireBucket); fallback `BucketSizeBytes` StandardStorage growth (latest daily Average − ~30d-ago Average, else latest total); GB = bytes × compression ÷ 1024³ | `defend_basic` / `cw_incoming_bytes` / `cw_bucket_size_growth` — same metrics, dimensions, periods, fallback order, math | — |
+| Detailed CloudTrail | 513-654 — base-path discovery (account/org → cloudtrail dir → regions, digest paths dropped), daily prefixes over N days, reservoir-sample 200 objects, gunzip + per-event JSON size by category, ratio × total compressed, per-category proportion, 30-day normalization | same walk/prefixes/sampling (random via `shuf`, evenly spaced without it), same jq categorization (`eventCategory`/`readOnly`), same extrapolation (verified numerically) | sampling is not reservoir-exact — same 200-object budget, different randomness |
+| S3 Data events row | **official bug:** categorizer emits `CloudTrail - Data (S3)` but the totals map checks `CloudTrail - Storage (S3)` (defend-aws:257 vs 561), so S3 Data event bytes are silently dropped from the CSV | we populate the `Storage Logs Ingestion GB` row with those bytes | fixes an upstream undercount (sizing bias: rather over than under) |
+| CSV | 829-887 — filename, header, `%.2f`, per-source rows | identical shape; one row set per discovered/named bucket | — |
 
 ## GCP — `wiz-gcp.sh`
 
