@@ -15,6 +15,12 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# The transient legacy checkout path of the old blob-embedding design. NOTE:
+# this is intentionally NOT reference/ — reference/ is the wiz-tools tree
+# moved verbatim as the *bash* parity oracle (PLAN.md §3), while the embedded
+# blobs legitimately evolved past it (e.g. azure scanner 2.9.0 vs 2.8.4), so
+# they are not byte-comparable. Blob integrity is enforced at build time by
+# tools/build_wiz.py --check instead.
 LEGACY = ROOT / "sizing-scripts"
 
 

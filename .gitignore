@@ -218,8 +218,10 @@ __marimo__/
 .streamlit/secrets.toml
 
 # wiz-sizing
-#   The legacy sizing-scripts/ tree lives only in git history; it is restored
-#   transiently (git checkout <ref> -- ...) to edit a scanner, then re-embedded
-#   into the wiz-*.py blobs by tools/build_wiz.py. Keep it out of commits so the
-#   embedded blob stays the single source of truth.
+#   The official/hardened source scripts now live in-tree under reference/
+#   (the parity oracle). The old transient sizing-scripts/ checkout path is
+#   retired; keep any stray restore out of commits.
 sizing-scripts/
+
+# Scratch notes, not part of the tool
+WHY.md

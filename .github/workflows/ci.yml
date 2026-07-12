@@ -6,7 +6,28 @@ on:
   pull_request:
 
 jobs:
-  test:
+  bash:
+    # The no-creds gates for the shipped bash scripts (PLAN.md §8.2, §14):
+    # shellcheck lint + CSV contract + no-session smoke. No cloud session.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats + shellcheck
+        run: sudo apt-get update && sudo apt-get install -y bats shellcheck
+      - name: shellcheck (scripts + parity harness)
+        run: |
+          files=$(ls wiz-*.sh parity/*.sh 2>/dev/null || true)
+          if [ -n "$files" ]; then shellcheck $files; else echo "no bash scripts yet"; fi
+      - name: CSV contract (tests/contract.bats)
+        run: bats tests/contract.bats
+      - name: No-session smoke (tests/smoke.bats)
+        run: bats tests/smoke.bats
+      - name: parity/diff.sh comparator self-test
+        run: bash parity/diff.sh azure --stub
+
+  python-safety-net:
+    # The retired-in-waiting Python (§3): stays green until each CSP clears
+    # its live parity gate and the corresponding wiz-<csp>.py is removed.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
