@@ -194,10 +194,26 @@ registry images stay pending (D2/D5-style, reported as pending not zero).
 
 ## Code — `wiz-code.sh`
 
-*Pending — filled in Phase 4.*
+Oracles: `reference/code/github/active-developer-count-github.py` ("gh"),
+`reference/code/gitlab/active-developer-count-gitlab.py` ("gl"),
+`reference/code/hcp-terraform/active-developer-count-hcp.py` ("hcp").
+Azure DevOps counting is mapped under the Azure section (it ships inside
+`wiz-azure.sh`). All providers share the officials' 90-day window (`--days`),
+sha256-hashed developer files unless `--decrypt` (gh:459-463), the
+`slugify` filename rule (gh:179-186), and the cross-VCS
+`active-developers.txt` rollup (gh:188-201).
 
-| Count (output) | Official | Ours | Deviation |
+| Piece | Official | Ours (`wiz-code.sh`) | Deviation |
 |---|---|---|---|
+| GitHub repositories | gh:296-328 — org repos (`type=all, sort=full_name`), else the token's `/user/repos`; `--repo` narrows | same REST endpoints, paged `per_page=100` | — |
+| GitHub membership gate | gh:354-386,405-407 — collaborators list; on failure count all authors (org_access=False) | `GET /repos/{r}/collaborators`; 403/empty → no gate, same message | — |
+| GitHub developer identity | gh:388-445 — dedupe by author **id**; export email: single → itself; multiple → drop `users.noreply` unless none remain; then most-commits | same rules in one jq reduction (`run_github`), mock-verified per case | — |
+| GitLab projects | gl:300-373 — group (first search hit, include_subgroups) / single project / membership projects, archived excluded | same `/api/v4` endpoints + params | — |
+| GitLab membership gate | gl:390-405,462-476 — `members/all`; skip committers not a member **by display name** or not `state=active` | same name+state test | — |
+| GitLab developer identity | gl:478-486 — dedupe by committer email | same | — |
+| HCP scope | hcp:398-457 — all orgs → memberships, workspaces; workspace + org runs, `filter[source]=tfe-ui,tfe-api,tfe-configuration-version`, `filter[timeframe]=year`, run-id dedupe | same endpoints/filters, JSON:API `links.next` pagination | — |
+| HCP developer identity | hcp:324-366 — UI/API runs: creator user unless service account, keyed by membership email else user id; CV runs: ingress-attributes `sender-username` | same, with the officials' user/service-account caches | — |
+| Outputs | gh:455-471 / gl:485-499 / hcp:369-385 — `<provider><slug>-developers.txt`, `-developers-log.txt` CSV headers with the dynamic day window, `hcpt-developers.txt`, rollup | identical filenames/headers (contract-tested) | — |
 
 ## M365 — `wiz-365.ps1`
 
