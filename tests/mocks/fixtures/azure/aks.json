@@ -1,0 +1,3 @@
+{"value":[
+  {"name":"aks1","properties":{"agentPoolProfiles":[{"name":"pool1","count":2},{"name":"pool2","count":3}]}}
+]}

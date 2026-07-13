@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Mock az for the e2e counting tests: only token acquisition is served, and
+# every invocation is logged so the tests can assert the file-based token
+# cache keeps this to a single call per audience.
+echo "az $*" >> "${MOCK_CALLS_LOG:-/dev/null}"
+case "${1:-} ${2:-}" in
+  "account get-access-token")
+    printf '{"accessToken":"mock-az-token","expires_on":9999999999,"tokenType":"Bearer"}\n' ;;
+  *)
+    echo "mock az: unexpected invocation: az $*" >&2
+    exit 1 ;;
+esac

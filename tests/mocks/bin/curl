@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Mock curl for the wiz-azure.sh / wiz-gcp.sh end-to-end counting tests:
+# serves fixture JSON by URL pattern and never touches the network. The
+# response format mimics the scripts' `-w '\n%{http_code}'` contract
+# (body, newline, status code). Config via env:
+#   MOCK_FIXTURES  fixture root (tests/mocks/fixtures)
+#   MOCK_HTTP_LOG  request log — one "METHOD URL" line per call (optional)
+#   MOCK_HTTP_FAIL extended-regex matched against "METHOD URL BODY";
+#                  matching requests get an HTTP 403 (optional)
+set -uo pipefail
+
+method=GET body='' prev=''
+for a in "$@"; do
+  case "$prev" in
+    -X) method=$a ;;
+    --data) body=$a ;;
+  esac
+  prev=$a
+done
+url=${!#}
+
+[[ -n "${MOCK_HTTP_LOG:-}" ]] && printf '%s %s\n' "$method" "$url" >> "$MOCK_HTTP_LOG"
+
+if [[ -n "${MOCK_HTTP_FAIL:-}" ]] && printf '%s %s %s' "$method" "$url" "$body" | grep -Eq "$MOCK_HTTP_FAIL"; then
+  printf '{"error":"mock-forced failure"}\n403'
+  exit 0
+fi
+
+f() { cat "$MOCK_FIXTURES/$1"; }
+
+route() {
+  case "$url" in
+    # --- Azure (ARM + Resource Graph) ---------------------------------------
+    *Microsoft.Compute/virtualMachines\?*)      f azure/vms.json ;;
+    *virtualMachineScaleSets\?*)                f azure/empty-value.json ;;
+    *managedClusters\?*)                        f azure/aks.json ;;
+    *Microsoft.Web/sites\?*)                    f azure/empty-value.json ;;
+    *containerGroups\?*)                        f azure/empty-value.json ;;
+    *containerApps\?*)                          f azure/empty-value.json ;;
+    *HybridCompute/machines\?*)                 f azure/empty-value.json ;;
+    *AzureStackHCI/clusters\?*)                 f azure/empty-value.json ;;
+    *Microsoft.ResourceGraph/resources*)        f azure/arg.json ;;
+    *management.azure.com/subscriptions/*\?api-version=*) f azure/subscription.json ;;
+    # --- GCP -----------------------------------------------------------------
+    *cloudresourcemanager.googleapis.com/v1/projects\?*)   f gcp/projects.json ;;
+    *cloudresourcemanager.googleapis.com/v1/projects/proj-a*) f gcp/project-proj-a.json ;;
+    *cloudresourcemanager.googleapis.com/v2/folders\?parent=organizations%2F123*) f gcp/folders-org.json ;;
+    *cloudresourcemanager.googleapis.com/v2/folders\?*)    f gcp/empty.json ;;
+    *serviceusage.googleapis.com/v1/projects/proj-a/*)     f gcp/services-proj-a.json ;;
+    *serviceusage.googleapis.com/v1/projects/proj-b/*)     f gcp/services-proj-b.json ;;
+    *compute.googleapis.com/compute/v1/projects/proj-a/aggregated/instances*) f gcp/instances-proj-a.json ;;
+    *compute.googleapis.com/compute/v1/projects/proj-b/aggregated/instances*) f gcp/empty.json ;;
+    *zones/z1/disks/d1*)                                   f gcp/disk-d1.json ;;
+    *global/images/debian-12*)                             f gcp/image-debian-12.json ;;
+    *cloudfunctions.googleapis.com/v2/projects/proj-a/*)   f gcp/functions-proj-a.json ;;
+    *cloudfunctions.googleapis.com/v2/projects/proj-b/*)   f gcp/empty.json ;;
+    *cloudasset.googleapis.com/*)                          f gcp/cai-instances.json ;;
+    *) return 1 ;;
+  esac
+}
+
+if out=$(route); then
+  printf '%s\n200' "$out"
+else
+  printf '{"error":"mock curl: no fixture for %s"}\n404' "$url"
+fi

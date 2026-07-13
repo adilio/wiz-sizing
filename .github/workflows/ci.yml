@@ -22,6 +22,8 @@ jobs:
         run: bats tests/contract.bats
       - name: No-session smoke (tests/smoke.bats)
         run: bats tests/smoke.bats
+      - name: Mock end-to-end counting (tests/mock_e2e.bats)
+        run: bats tests/mock_e2e.bats
       - name: parity/diff.sh comparator self-test
         run: bash parity/diff.sh azure --stub
 

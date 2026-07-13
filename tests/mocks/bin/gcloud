@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Mock gcloud for the e2e counting tests: only token acquisition is served,
+# and every invocation is logged so the tests can assert the file-based token
+# cache keeps this to a single call.
+echo "gcloud $*" >> "${MOCK_CALLS_LOG:-/dev/null}"
+case "${1:-} ${2:-}" in
+  "auth print-access-token")
+    echo "mock-gcp-token" ;;
+  *)
+    echo "mock gcloud: unexpected invocation: gcloud $*" >&2
+    exit 1 ;;
+esac

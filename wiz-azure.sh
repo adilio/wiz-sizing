@@ -106,8 +106,6 @@ defend_type_info() { # $1 = DataType → "Display Name|Category"
   esac
 }
 
-declare -A TOKENS TOKEN_EXPIRY
-
 RUN_STARTED_AT=$SECONDS
 STATE_FILE=''
 TMP_DIR=''
@@ -135,7 +133,8 @@ Modes:
 Flags:
   --fast              Fast estimate via Resource Graph aggregations. Skips the
                       live drill-downs; see the deviation notes in --help output
-                      below (D3-D5).
+                      below (D3-D5). Falls back to the accurate path per
+                      subscription when Resource Graph is unavailable.
   --data              Also count Data Security resources (Buckets, PaaS DBs)
   --images            Also count Registry Container Images (ACR)
   --resume            Resume an interrupted scan (per-subscription checkpoints)
@@ -279,22 +278,32 @@ require_tools() {
 ####
 
 get_token() { # $1 = audience/resource → prints access token
-  local aud="$1" now exp json
+  # Cached as a file under $TMP_DIR (0600): every HTTP call chain runs inside
+  # $(...) subshells, so shell-variable caches never survive back to the
+  # parent — the file cache does, and it is shared across parallel workers.
+  local aud="$1" now exp json token cache=''
   now=$(date +%s)
-  exp="${TOKEN_EXPIRY[$aud]:-0}"
-  if [[ -n "${TOKENS[$aud]:-}" ]] && (( exp - now > 300 )); then
-    printf '%s' "${TOKENS[$aud]}"
-    return 0
+  if [[ -n "$TMP_DIR" ]]; then
+    cache="$TMP_DIR/token.${aud//[^A-Za-z0-9]/_}"
+    if [[ -r "$cache" ]]; then
+      { IFS= read -r exp && IFS= read -r token; } < "$cache" || token=''
+      if [[ -n "$token" && "$exp" =~ ^[0-9]+$ ]] && (( exp - now > 300 )); then
+        printf '%s' "$token"
+        return 0
+      fi
+    fi
   fi
   if ! json=$(az account get-access-token --resource "$aud" --output json 2>/dev/null); then
     err "cannot acquire a token for $aud — run 'az login' first"
     return 1
   fi
-  TOKENS[$aud]=$(jq -r '.accessToken' <<<"$json")
+  token=$(jq -r '.accessToken' <<<"$json")
   exp=$(jq -r '.expires_on // empty' <<<"$json")
   [[ "$exp" =~ ^[0-9]+$ ]] || exp=$(( now + 3300 ))
-  TOKEN_EXPIRY[$aud]=$exp
-  printf '%s' "${TOKENS[$aud]}"
+  if [[ -n "$cache" ]]; then
+    ( umask 077; printf '%s\n%s\n' "$exp" "$token" > "$cache.$$" ) && mv -f "$cache.$$" "$cache"
+  fi
+  printf '%s' "$token"
 }
 
 ####
@@ -346,8 +355,8 @@ arg_query() { # $1 = subscription id ('' = tenant-wide), $2 = KQL → data array
       '{query:$q}
        + (if $sub == "" then {} else {subscriptions:[$sub]} end)
        + (if $st == "" then {} else {options:{"$skipToken":$st}} end)')
-    page=$(http_request POST "$ARM_AUDIENCE" "$ARG_URL" "$body") || break
-    out=$(jq -c --argjson acc "$out" '$acc + (.data // [])' <<<"$page") || break
+    page=$(http_request POST "$ARM_AUDIENCE" "$ARG_URL" "$body") || return 1
+    out=$(jq -c --argjson acc "$out" '$acc + (.data // [])' <<<"$page") || return 1
     skip_token=$(jq -r '."$skipToken" // empty' <<<"$page")
     [[ -z "$skip_token" ]] && break
   done
@@ -627,15 +636,26 @@ scan_sub_cloud_accurate() { # $1 sub id, $2 sub name, $3 tmp prefix
 # Cloud counting — fast (Resource Graph aggregations; deviations D3-D5)
 ####
 
-arg_scalar() { # $1 sub, $2 kql, $3 jq path for the scalar → integer (0 on miss)
+arg_scalar() { # $1 sub, $2 kql, $3 jq path for the scalar → integer (0 on miss);
+               # status 1 when the ARG query itself failed (≠ a real zero)
   local out
-  out=$(arg_query "$1" "$2")
+  out=$(arg_query "$1" "$2") || return 1
   out=$(jq -r "first | $3 // 0" <<<"$out" 2>/dev/null) || out=0
   [[ "$out" =~ ^[0-9]+$ ]] || out=0
   printf '%s' "$out"
 }
 
 scan_sub_cloud_fast() { # $1 sub id, $2 sub name, $3 tmp prefix
+  # Fast is best-effort, never silently zero (§7): any ARG failure discards
+  # the partial fast counts and reruns this subscription on the accurate path.
+  local sub="$1" name="$2" prefix="$3"
+  if ! scan_sub_cloud_fast_try "$sub" "$name" "$prefix"; then
+    status "[FALLBACK] Subscription $name: Resource Graph unavailable — accurate path (§7)"
+    scan_sub_cloud_accurate "$sub" "$name" "$prefix"
+  fi
+}
+
+scan_sub_cloud_fast_try() { # $1 sub id, $2 sub name, $3 tmp prefix; 1 on any ARG failure
   local sub="$1" name="$2" prefix="$3"
   local counts="$prefix.counts" logf="$prefix.log"
   ERR_SINK="$prefix.errors"
@@ -647,12 +667,12 @@ scan_sub_cloud_fast() { # $1 sub id, $2 sub name, $3 tmp prefix
   n=$(arg_scalar "$sub" 'resources
     | where type == "microsoft.compute/virtualmachines"
     | where tags.Vendor != '\''Databricks'\''
-    | summarize count()' '.count_')
+    | summarize count()' '.count_') || return 1
   nonos=$(arg_scalar "$sub" 'resources
     | where type == "microsoft.compute/virtualmachines"
     | where tags.Vendor != '\''Databricks'\''
     | project non_os_disks_count = iff(isnotempty(properties.storageProfile.dataDisks), array_length(properties.storageProfile.dataDisks), 0)
-    | summarize sum(non_os_disks_count)' '.sum_non_os_disks_count')
+    | summarize sum(non_os_disks_count)' '.sum_non_os_disks_count') || return 1
   emit_count 'Virtual Machines' "$n" "$counts"
   emit_count 'Non-OS Disks' "$nonos" "$counts"
   progress_count "$n" 'Virtual Machines [Compute]' "$name" "$logf" "with $nonos Non-OS Disks"
@@ -660,7 +680,7 @@ scan_sub_cloud_fast() { # $1 sub id, $2 sub name, $3 tmp prefix
   # Scale Set VMs — configured capacity, not live instances (D3)
   n=$(arg_scalar "$sub" 'resources
     | where type == "microsoft.compute/virtualmachinescalesets"
-    | summarize total = sum(toint(sku.capacity))' '.total')
+    | summarize total = sum(toint(sku.capacity))' '.total') || return 1
   emit_count 'Virtual Machines' "$n" "$counts"
   progress_count "$n" 'Virtual Machines [Scale Sets]' "$name" "$logf" '(configured capacity, D3)'
 
@@ -669,7 +689,7 @@ scan_sub_cloud_fast() { # $1 sub id, $2 sub name, $3 tmp prefix
     | where type == "microsoft.containerservice/managedclusters"
     | mv-expand pool = properties.agentPoolProfiles
     | summarize aks_instances_count = sum(toint(pool["count"]))
-    | project sum_aks_instances_count = aks_instances_count' '.sum_aks_instances_count')
+    | project sum_aks_instances_count = aks_instances_count' '.sum_aks_instances_count') || return 1
   emit_count 'Container Hosts' "$n" "$counts"
   emit_count 'Kubernetes Sensors' "$n" "$counts"
   progress_count "$n" 'Container Hosts [AKS]' "$name" "$logf"
@@ -678,10 +698,10 @@ scan_sub_cloud_fast() { # $1 sub id, $2 sub name, $3 tmp prefix
   local sites static
   sites=$(arg_scalar "$sub" 'resources
     | where type == "microsoft.web/sites"
-    | summarize count()' '.count_')
+    | summarize count()' '.count_') || return 1
   static=$(arg_scalar "$sub" 'resources
     | where type == "microsoft.web/staticsites"
-    | summarize count()' '.count_')
+    | summarize count()' '.count_') || return 1
   n=$(( sites + static ))
   emit_count 'Serverless Functions' "$n" "$counts"
   progress_count "$n" 'Serverless Functions [Web Apps]' "$name" "$logf" '(sites only, D4)'
@@ -689,26 +709,26 @@ scan_sub_cloud_fast() { # $1 sub id, $2 sub name, $3 tmp prefix
   # ACI + Container Apps + Arc + Stack HCI — index count() (PLAN §7)
   n=$(arg_scalar "$sub" 'resources
     | where type == "microsoft.containerinstance/containergroups"
-    | summarize count()' '.count_')
+    | summarize count()' '.count_') || return 1
   emit_count 'Serverless Containers' "$n" "$counts"
   progress_count "$n" 'Serverless Containers [Azure Container Instances]' "$name" "$logf"
 
   n=$(arg_scalar "$sub" 'resources
     | where type == "microsoft.app/containerapps"
-    | summarize count()' '.count_')
+    | summarize count()' '.count_') || return 1
   emit_count 'Serverless Containers' "$n" "$counts"
   emit_count 'Serverless Container Sensors' "$n" "$counts"
   progress_count "$n" 'Serverless Containers [Azure Container Apps]' "$name" "$logf"
 
   n=$(arg_scalar "$sub" 'resources
     | where type == "microsoft.hybridcompute/machines"
-    | summarize count()' '.count_')
+    | summarize count()' '.count_') || return 1
   emit_count 'Asset Metadata' "$n" "$counts"
   progress_count "$n" 'Asset Metadata [Arc Machines]' "$name" "$logf"
 
   n=$(arg_scalar "$sub" 'resources
     | where type == "microsoft.azurestackhci/clusters"
-    | summarize count()' '.count_')
+    | summarize count()' '.count_') || return 1
   emit_count 'Asset Metadata' "$n" "$counts"
   progress_count "$n" 'Asset Metadata [Stack HCI Clusters]' "$name" "$logf"
 
@@ -716,7 +736,7 @@ scan_sub_cloud_fast() { # $1 sub id, $2 sub name, $3 tmp prefix
     # SQL databases are index-visible; buckets are data-plane and stay pending (D5)
     n=$(arg_scalar "$sub" 'resources
       | where type == "microsoft.sql/servers/databases"
-      | summarize count()' '.count_')
+      | summarize count()' '.count_') || return 1
     emit_count 'PaaS Databases' "$n" "$counts"
     progress_count "$n" 'PaaS Databases [SQL]' "$name" "$logf"
     status "- Data Buckets pending in $name: the index cannot see the data plane (D5); rerun without --fast"

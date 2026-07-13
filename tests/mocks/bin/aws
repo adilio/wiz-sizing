@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Mock aws CLI for the wiz-aws.sh end-to-end counting tests. Routes on
+# "<service> <operation>"; unmatched read-only calls return '{}' (zero
+# counts). resource-explorer-2 serves the EC2 query and fails every other
+# one, which is what drives the fast-mode fallback test.
+set -uo pipefail
+echo "aws $*" >> "${MOCK_CALLS_LOG:-/dev/null}"
+
+case "${1:-} ${2:-}" in
+  "sts get-caller-identity")
+    echo '{"Account":"111111111111","Arn":"arn:aws:iam::111111111111:user/mock","UserId":"MOCK"}' ;;
+  "iam list-account-aliases")
+    echo '{"AccountAliases":[]}' ;;
+  "ec2 describe-regions")
+    echo '{"Regions":[{"RegionName":"us-east-1"}]}' ;;
+  "lightsail get-regions")
+    echo '{"regions":[]}' ;;
+  "ec2 describe-instances")
+    case "$*" in
+      *--filters*) echo '{"Reservations":[]}' ;;               # EKS node lookup
+      *)           cat "$MOCK_FIXTURES/aws/ec2-instances.json" ;;
+    esac ;;
+  "ecs list-clusters")
+    echo '{"clusterArns":[]}' ;;
+  "eks list-clusters")
+    echo '{"clusters":[]}' ;;
+  "lambda list-functions")
+    cat "$MOCK_FIXTURES/aws/lambda-functions.json" ;;
+  "lambda list-versions-by-function")
+    # shellcheck disable=SC2016  # $LATEST is a literal Lambda version marker
+    echo '{"Versions":[{"Version":"$LATEST"},{"Version":"1"}]}' ;;
+  "sagemaker list-domains")
+    echo '{"Domains":[]}' ;;
+  "sagemaker list-endpoints")
+    echo '{"Endpoints":[]}' ;;
+  "resource-explorer-2 search")
+    case "$*" in
+      *ec2:instance*) echo '{"Count":{"TotalResources":9}}' ;;
+      *) echo "mock aws: Resource Explorer query failed" >&2; exit 254 ;;
+    esac ;;
+  *)
+    echo '{}' ;;
+esac

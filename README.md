@@ -82,8 +82,10 @@ Common flags on every CSP script:
 
 Scoping: `wiz-azure.sh --subscription ID | --subscriptions-file F`,
 `wiz-aws.sh --org | --accounts-file F | --regions LIST`,
-`wiz-gcp.sh --projects LIST | --org ORG_ID`. Defaults scan everything your
-session can see (all subscriptions / current account / all listable projects).
+`wiz-gcp.sh --projects LIST | --org ORG_ID` (GCP `--org` scopes every scan —
+accurate, Defend, fast — to the org's projects, folders included). Defaults
+scan everything your session can see (all subscriptions / current account /
+all listable projects).
 
 ### Long scans
 
@@ -161,9 +163,15 @@ scripts, so fidelity is engineered, not assumed:
    rows to the officials'; [`tests/smoke.bats`](tests/) proves `--help` /
    `--list` / `--dry-run` / the menu run with the cloud CLIs stubbed out
    entirely. CI runs both plus `shellcheck` on every push.
-4. [`parity/diff.sh`](parity/diff.sh) runs the official Python and the bash
-   script against the *same live scope* and diffs the CSVs per resource type —
-   the final, live gate.
+4. [`tests/mock_e2e.bats`](tests/) runs the real counting paths end-to-end
+   against fixture APIs (stubbed `curl`/`az`/`aws`/`gcloud`, no network) and
+   diffs each produced `<csp>-resources.csv` against hand-verified expected
+   files — including fast-mode fallback, GCP `--org` scoping, and
+   one-token-per-audience acquisition. CI runs it on every push.
+5. [`parity/diff.sh`](parity/diff.sh) runs the official Python and the bash
+   script against the *same live scope* (both sides get an explicit
+   `--scope <ID>`) and diffs the CSVs per resource type — the final, live
+   gate.
 
 Known, deliberate deviations are documented in
 [`PLAN.md` §9](PLAN.md) (D1–D6) — each notes its direction; where a deviation
@@ -181,7 +189,7 @@ has one, it leans **high**, so a sizing quote is never short.
 wiz-azure.sh  wiz-aws.sh  wiz-gcp.sh  wiz-code.sh  wiz-365.ps1   # what you run
 reference/    # official + hardened source scripts — the parity oracle (not shipped)
 parity/       # mapping.md (per-count citations) + diff.sh (live parity harness)
-tests/        # contract.bats + smoke.bats — no-creds CI gates
+tests/        # contract.bats + smoke.bats + mock_e2e.bats (+ mocks/) — no-creds CI gates
 wiz-*.py, tools/   # previous Python generation — retained awaiting live parity
 ```
 

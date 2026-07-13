@@ -650,45 +650,57 @@ re_count() { # $1 query-string, $2 region → count, or '' when the index is unu
 }
 
 scan_account_fast() { # $1 acct id, $2 acct name, $3 home region, $4 tmp prefix
+  # Fast is best-effort, never silently zero (§7): if ANY Resource Explorer
+  # query fails — not just the first — the partial fast counts are discarded
+  # and the caller runs the full accurate path for this account.
   local acct="$1" name="$2" region="$3" prefix="$4"
   local counts="$prefix.counts" logf="$prefix.log"
   ERR_SINK="$prefix.errors"
   : > "$counts"; : > "$logf"
-  apply_creds "$acct" || { ERR_SINK=''; return 0; }
+  apply_creds "$acct" || { ERR_SINK=''; printf 0; return 0; }
 
-  local n ok=1
-  n=$(re_count 'resourcetype:ec2:instance' "$region") || ok=0
-  if (( ok )); then
-    emit_count 'Virtual Machines' "${n:-0}" "$counts"
-    progress_count "${n:-0}" 'Virtual Machines [EC2]' "$name" 'all-regions' "$logf" '(Resource Explorer, D6)'
-    n=$(re_count 'resourcetype:lambda:function' "$region") || n=0
-    emit_count 'Serverless Functions' "${n:-0}" "$counts"
-    progress_count "${n:-0}" 'Serverless Functions [Lambda]' "$name" 'all-regions' "$logf" '(no versions, D6)'
-    if (( DATA )); then
-      n=$(re_count 'resourcetype:s3:bucket' "$region") || n=0
-      (( n > 10000 )) && n=10000
-      emit_count 'Data Buckets' "${n:-0}" "$counts"
-      progress_count "${n:-0}" 'Data Buckets [S3]' "$name" 'all-regions' "$logf"
-      local db cl
-      db=$(re_count 'resourcetype:rds:db' "$region") || db=0
-      cl=$(re_count 'resourcetype:rds:cluster' "$region") || cl=0
-      n=$(( ${db:-0} + ${cl:-0} ))
-      emit_count 'PaaS Databases' "$n" "$counts"
-      progress_count "$n" 'PaaS Databases [RDS + clusters]' "$name" 'all-regions' "$logf" '(index types, D6)'
-      n=$(re_count 'resourcetype:dynamodb:table' "$region") || n=0
-      (( n > 10000 )) && n=10000
-      emit_count 'Data Warehouses' "${n:-0}" "$counts"
-      progress_count "${n:-0}" 'Data Warehouses [DynamoDB]' "$name" 'all-regions' "$logf"
-    fi
+  if scan_account_fast_try "$acct" "$name" "$region" "$prefix"; then
     (( IMAGES )) && status "- Registry Container Images pending in $name: not countable from the index; rerun without --fast"
+    ERR_SINK=''
+    # Container hosts + serverless containers are never index-visible as node/
+    # container counts — the caller runs the accurate path for those.
+    printf 1
   else
-    status "- Resource Explorer index not available in $name — falling back to the accurate path (§7)"
+    : > "$counts"; : > "$logf"   # discard partial fast rows; accurate recounts everything
+    status "- Resource Explorer query failed in $name — falling back to the accurate path (§7)"
+    ERR_SINK=''
+    printf 0
   fi
-  ERR_SINK=''
-  # Container hosts + serverless containers are never index-visible as node/
-  # container counts — the caller runs the accurate path for those (and for
-  # everything else when ok=0).
-  printf '%s' "$ok"
+}
+
+scan_account_fast_try() { # $1 acct id, $2 acct name, $3 home region, $4 tmp prefix; 1 on any index failure
+  local acct="$1" name="$2" region="$3" prefix="$4"
+  local counts="$prefix.counts" logf="$prefix.log"
+
+  local n
+  n=$(re_count 'resourcetype:ec2:instance' "$region") || return 1
+  emit_count 'Virtual Machines' "${n:-0}" "$counts"
+  progress_count "${n:-0}" 'Virtual Machines [EC2]' "$name" 'all-regions' "$logf" '(Resource Explorer, D6)'
+  n=$(re_count 'resourcetype:lambda:function' "$region") || return 1
+  emit_count 'Serverless Functions' "${n:-0}" "$counts"
+  progress_count "${n:-0}" 'Serverless Functions [Lambda]' "$name" 'all-regions' "$logf" '(no versions, D6)'
+  if (( DATA )); then
+    n=$(re_count 'resourcetype:s3:bucket' "$region") || return 1
+    (( n > 10000 )) && n=10000
+    emit_count 'Data Buckets' "${n:-0}" "$counts"
+    progress_count "${n:-0}" 'Data Buckets [S3]' "$name" 'all-regions' "$logf"
+    local db cl
+    db=$(re_count 'resourcetype:rds:db' "$region") || return 1
+    cl=$(re_count 'resourcetype:rds:cluster' "$region") || return 1
+    n=$(( ${db:-0} + ${cl:-0} ))
+    emit_count 'PaaS Databases' "$n" "$counts"
+    progress_count "$n" 'PaaS Databases [RDS + clusters]' "$name" 'all-regions' "$logf" '(index types, D6)'
+    n=$(re_count 'resourcetype:dynamodb:table' "$region") || return 1
+    (( n > 10000 )) && n=10000
+    emit_count 'Data Warehouses' "${n:-0}" "$counts"
+    progress_count "${n:-0}" 'Data Warehouses [DynamoDB]' "$name" 'all-regions' "$logf"
+  fi
+  return 0
 }
 
 ####

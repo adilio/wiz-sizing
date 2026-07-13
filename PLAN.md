@@ -1,8 +1,10 @@
 # Wiz Sizing — Bash-per-CSP Rewrite Plan
 
-> **Status: STRUCTURALLY COMPLETE (2026-07-12).** All six phases (§14) ran to
-> the §17 Definition of Done in one autonomous session. Details in the
-> implementation report below.
+> **Status: STRUCTURALLY COMPLETE (2026-07-12), hardened 2026-07-13.** All six
+> phases (§14) ran to the §17 Definition of Done in one autonomous session;
+> a second review pass then fixed five defects (see the hardening addendum
+> below). The live parity diff per CSP remains the one open gate — it needs a
+> real tenant/account (expected §17 end-state).
 >
 > Original preamble: This supersedes the earlier Python single-file-per-CSP
 > design (now in git history). The product is now **one curl-able bash script per
@@ -48,13 +50,20 @@ that provably makes zero cloud calls.
 
 ### Verification
 
-- No-creds gates: `shellcheck` clean; **all 20 bats tests pass with zero
-  skips** (contract + smoke, cloud CLIs stubbed to `exit 127`); the python
-  safety-net suite and `parity/diff.sh --stub` also pass. CI runs all of it.
-- Every counting path was additionally **mock-tested end-to-end** against
-  fake APIs (canned ARM/ARG/Log Analytics/DevOps, aws CLI, GCP REST,
-  GitHub/GitLab/HCP responses) with hand-computed expected counts — all
-  matched, including Defend volume math verified to the cent.
+- No-creds gates: `shellcheck` clean; **all 27 bats tests pass with zero
+  skips** (contract + smoke + mock e2e; cloud CLIs stubbed); the python
+  safety-net suite and `parity/diff.sh <csp> --stub` also pass. CI runs all
+  of it.
+- **Committed mock end-to-end suite** (`tests/mock_e2e.bats` +
+  `tests/mocks/`): the real cloud-counting paths of all three CSP scripts run
+  against fixture APIs (stubbed `curl`/`az`/`aws`/`gcloud`, no network) and
+  the produced `<csp>-resources.csv` files are diffed against hand-verified
+  expected CSVs. The suite also pins fast-mode fallback (a mid-sequence
+  index/ARG/CAI failure discards partial fast counts and reruns accurately),
+  GCP `--org` scoping (out-of-org projects never contacted), and one-token-
+  per-audience acquisition. *(The original session's broader mock runs —
+  Defend volume math, wiz-code — were ad hoc and not committed; only what is
+  in `tests/` counts as verified.)*
 - `parity/mapping.md` is complete for every CSP: per-count citations,
   official source line → bash call + `jq` reduction.
 
@@ -73,17 +82,41 @@ that provably makes zero cloud calls.
   empty `local -A` arrays (bash 5.2+), and consecutive-tab field collapse in
   `IFS=$'\t' read`.
 
+### Hardening addendum (2026-07-13)
+
+A post-ship review found five defects in the implementation report's claims;
+all are now fixed and regression-pinned by the committed mock e2e suite:
+
+1. **Fast-mode fallback was partial.** Azure `--fast` converted Resource
+   Graph failures into zero counts with no fallback; AWS/GCP fell back only
+   when the *first* index query failed (later failures became zeros). Now any
+   fast-query failure discards that scope's partial fast counts and reruns
+   the accurate path — fast can never silently zero (§7).
+2. **GCP `--org` didn't scope enumeration.** The accurate path and Defend
+   scanned every listable project regardless of `--org`. `enumerate_projects`
+   now walks the org's folder tree (cloudresourcemanager v2) and keeps only
+   ACTIVE projects parented inside it, so accurate/Defend match the `--fast`
+   org sweep's scope.
+3. **Azure/GCP token caching never took effect.** Tokens were cached in shell
+   variables, but every HTTP call runs inside `$(...)` subshells, so each
+   request re-invoked `az`/`gcloud`. The cache is now a 0600 file under the
+   run's temp dir — it survives subshells and is shared across parallel
+   workers (one acquisition per audience per run).
+4. **`parity/diff.sh` couldn't guarantee same-scope runs.** Live mode now
+   *requires* `--scope <ID>` and passes it to both sides (`--id` officially;
+   `--subscription`/`--accounts-file`/`--projects` for ours).
+5. **The mock e2e claim wasn't reproducible.** The suite is now committed
+   (`tests/mock_e2e.bats`) and wired into CI.
+
 ### Where things stand
 
-- **Branches:** the six phase commits are on **`origin/bash-rewrite`**
-  (wiz-sizing) and the sizing stub on **`origin/sizing-stub`** (wiz-tools) —
-  direct pushes to `main` were blocked by the session's permission policy, so
-  merging is a one-step manual action (local `main` is already ahead;
-  `git push origin main` or open PRs).
+- **Branches:** merged — `main` == `origin/main` in both repos (wiz-sizing
+  bash rewrite; wiz-tools sizing stub).
 - **The one open item** (expected §17 end-state): the **live parity diff**
-  per CSP needs a real tenant/account. Until each CSP passes
-  `parity/diff.sh`, its `wiz-<csp>.py` + `tools/` stay in-tree as the safety
-  net, noted in README. Everything else in §14/§17 is ticked.
+  per CSP needs a real tenant/account
+  (`parity/diff.sh <csp> --scope <ID>`). Until each CSP passes it, its
+  `wiz-<csp>.py` + `tools/` stay in-tree as the safety net, noted in README.
+  Everything else in §14/§17 is ticked.
 
 ---
 
@@ -475,7 +508,10 @@ something demands it — the configured/desired count is the accepted default.
 
 **Phase 5 — finalize**
 - [x] Rewrite README; confirm `wiz-tools` stub. *(Removal of `tools/` + the Python entrypoints is gated per §3 — no CSP has a live parity pass yet, so all are retained with the "awaiting live parity" note in README.)*
-- [ ] Wire `parity/diff.sh` to the first reference env when available. *(Open: no reference env exists yet — the expected §17 end-state.)*
+- *Deferred, not a checkbox (external dependency; §17's carve-out):* wire
+  `parity/diff.sh <csp> --scope <ID>` to the first reference env when one
+  exists. No reference env exists yet; §17 explicitly counts reaching this
+  state as a complete run.
 - [x] **Done when:** README is the single authoritative doc; for each CSP that cleared its §3 live gate, `tools/` + that Python entrypoint are removed (others retained with an "awaiting live parity" note); wiz-tools sizing stub confirmed; `parity/diff.sh` wired to a reference env if one exists.
 
 ## 15. Assumptions & resolved decisions

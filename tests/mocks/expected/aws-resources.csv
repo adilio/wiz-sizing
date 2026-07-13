@@ -1,0 +1,13 @@
+Resource Type,Resource Count
+Virtual Machines,1
+Container Hosts,0
+Serverless Functions,2
+Serverless Containers,0
+Data Buckets,0
+PaaS Databases,0
+Data Warehouses,0
+Non-OS Disks,1
+Registry Container Images,0
+Kubernetes Sensors,0
+Virtual Machine Sensors,1
+Serverless Container Sensors,0

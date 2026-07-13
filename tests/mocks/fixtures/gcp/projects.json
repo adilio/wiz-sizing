@@ -1,0 +1,6 @@
+{"projects":[
+  {"projectId":"proj-a","name":"Project A","lifecycleState":"ACTIVE","parent":{"type":"organization","id":"123"}},
+  {"projectId":"proj-b","name":"Project B","lifecycleState":"ACTIVE","parent":{"type":"folder","id":"456"}},
+  {"projectId":"proj-x","name":"Other Org Project","lifecycleState":"ACTIVE","parent":{"type":"organization","id":"999"}},
+  {"projectId":"proj-dead","name":"Deleted","lifecycleState":"DELETE_REQUESTED","parent":{"type":"organization","id":"123"}}
+]}

@@ -7,19 +7,21 @@
 #
 # Scaffold status: runnable today with --stub (synthetic CSV pair proving the
 # compare logic); wire a real environment by exporting the session and running
-#   parity/diff.sh azure|aws|gcp [--workdir DIR]
+#   parity/diff.sh <azure|aws|gcp> --scope <ID> [--workdir DIR]
 # from a shell that already has az/aws/gcloud auth. No env is bundled here.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKDIR=""
 STUB=0
+SCOPE=""
 CSP="${1:-}"
 [ $# -gt 0 ] && shift
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --workdir) WORKDIR="$2"; shift 2 ;;
+    --scope)   SCOPE="$2"; shift 2 ;;
     --stub)    STUB=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -27,11 +29,17 @@ done
 
 usage() {
   cat <<'EOF'
-Usage: parity/diff.sh <azure|aws|gcp> [--workdir DIR] [--stub]
+Usage: parity/diff.sh <azure|aws|gcp> --scope ID [--workdir DIR]
+       parity/diff.sh <azure|aws|gcp> --stub
 
-Runs the official reference script and wiz-<csp>.sh against the same live
+Runs the official reference script and wiz-<csp>.sh against the SAME explicit
 scope, then diffs the per-type counts in the resulting CSVs.
 
+  --scope ID     REQUIRED for live runs — the single subscription (azure),
+                 account (aws), or project (gcp) BOTH implementations scan.
+                 Passing it explicitly is what guarantees identical scope:
+                 the official Azure/GCP scripts otherwise prompt, and the
+                 bash scripts otherwise default to everything visible.
   --workdir DIR  keep outputs in DIR (default: mktemp)
   --stub         skip the live runs; exercise the comparator on synthetic
                  fixtures (CI-safe self-test of this harness)
@@ -78,28 +86,44 @@ if [ "$STUB" -eq 1 ]; then
 fi
 
 # ---- live mode (needs a real session; wired per §3 when a reference env lands)
+if [ -z "$SCOPE" ]; then
+  echo "error: live runs require --scope <ID> so both implementations provably scan the same" >&2
+  echo "subscription/account/project (the official script would otherwise prompt, ours would" >&2
+  echo "otherwise scan everything visible)." >&2
+  exit 2
+fi
+
+# Both sides get the scope explicitly: official via --id, ours via its
+# single-scope flag. This is the same-scope guarantee the §3 gate rests on.
 case "$CSP" in
   azure)
     OFFICIAL="$ROOT/reference/cloud/azure/resource-count-azure-v2.py"
+    OFFICIAL_ARGS=(--id "$SCOPE")
     OURS="$ROOT/wiz-azure.sh"
+    OURS_ARGS=(--subscription "$SCOPE")
     ;;
   aws)
     OFFICIAL="$ROOT/reference/cloud/aws/resource-count-aws-v2.py"
+    OFFICIAL_ARGS=(--id "$SCOPE")
     OURS="$ROOT/wiz-aws.sh"
+    printf '%s\n' "$SCOPE" > "$WORKDIR/accounts.txt"
+    OURS_ARGS=(--accounts-file "$WORKDIR/accounts.txt")
     ;;
   gcp)
     OFFICIAL="$ROOT/reference/cloud/gcp/resource-count-gcp-v2.py"
+    OFFICIAL_ARGS=(--id "$SCOPE")
     OURS="$ROOT/wiz-gcp.sh"
+    OURS_ARGS=(--projects "$SCOPE")
     ;;
 esac
 
 [ -f "$OURS" ] || { echo "$OURS not built yet" >&2; exit 1; }
 
-echo "== official: $OFFICIAL → $OFFICIAL_DIR"
-(cd "$OFFICIAL_DIR" && python3 "$OFFICIAL")
+echo "== official: $OFFICIAL (scope: $SCOPE) → $OFFICIAL_DIR"
+(cd "$OFFICIAL_DIR" && python3 "$OFFICIAL" "${OFFICIAL_ARGS[@]}")
 
-echo "== ours: $OURS → $OURS_DIR"
-(cd "$OURS_DIR" && bash "$OURS" cloud --output-dir "$OURS_DIR" --quiet)
+echo "== ours: $OURS (scope: $SCOPE) → $OURS_DIR"
+(cd "$OURS_DIR" && bash "$OURS" cloud "${OURS_ARGS[@]}" --output-dir "$OURS_DIR" --quiet)
 
 echo "== diff (per resource type) =="
 if compare_counts "$OFFICIAL_DIR/$CSP-resources.csv" "$OURS_DIR/$CSP-resources.csv"; then

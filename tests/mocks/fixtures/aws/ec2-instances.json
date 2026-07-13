@@ -1,0 +1,7 @@
+{"Reservations":[{"Instances":[
+  {"InstanceId":"i-linux","State":{"Name":"running"},"platform":"LINUX_UNIX",
+   "BlockDeviceMappings":[{"Ebs":{"VolumeId":"vol-root"}},{"Ebs":{"VolumeId":"vol-data"}}],
+   "Tags":[]},
+  {"InstanceId":"i-terminated","State":{"Name":"terminated"},"platform":"LINUX_UNIX",
+   "BlockDeviceMappings":[],"Tags":[]}
+]}]}

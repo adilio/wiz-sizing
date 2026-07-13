@@ -1,0 +1,13 @@
+{"items":{
+  "zones/z1":{"instances":[
+    {"name":"inst-linux","labels":{},
+     "disks":[
+       {"boot":true,"source":"https://www.googleapis.com/compute/v1/projects/proj-a/zones/z1/disks/d1"},
+       {"boot":false,"source":"https://www.googleapis.com/compute/v1/projects/proj-a/zones/z1/disks/d2"}
+     ]},
+    {"name":"inst-gke-node","labels":{"goog-gke-node":""},
+     "disks":[
+       {"boot":true,"source":"https://www.googleapis.com/compute/v1/projects/proj-a/zones/z1/disks/d3"}
+     ]}
+  ]}
+}}

@@ -1,0 +1,11 @@
+{"value":[
+  {"name":"vm-linux","tags":{},
+   "properties":{"storageProfile":{"dataDisks":[{"lun":0},{"lun":1}]},
+                 "osProfile":{"linuxConfiguration":{"disablePasswordAuthentication":true}}}},
+  {"name":"vm-windows","tags":{},
+   "properties":{"storageProfile":{"dataDisks":[]},
+                 "osProfile":{"windowsConfiguration":{"enableAutomaticUpdates":true}}}},
+  {"name":"vm-databricks","tags":{"Vendor":"Databricks"},
+   "properties":{"storageProfile":{"dataDisks":[{"lun":0}]},
+                 "osProfile":{"linuxConfiguration":{}}}}
+]}

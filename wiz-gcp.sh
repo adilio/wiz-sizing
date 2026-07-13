@@ -92,9 +92,6 @@ exclusion_ratio() { # $1 log key, $2 resource type
   esac
 }
 
-TOKEN=''
-TOKEN_EXPIRY=0
-
 RUN_STARTED_AT=$SECONDS
 STATE_FILE=''
 TMP_DIR=''
@@ -121,8 +118,9 @@ Modes:
 Scope flags:
   --projects LIST     Comma-separated project IDs (default: every ACTIVE
                       project your credentials can list)
-  --org ORG_ID        Organization ID — enables the single-call org-scope
-                      fast path (--fast) and org-wide Defend metrics
+  --org ORG_ID        Organization ID — scopes every scan (accurate, Defend)
+                      to the org's projects (including folders) and enables
+                      the single-call org-scope fast path (--fast)
 
 Cloud flags:
   --fast              Fast estimate via Cloud Asset Inventory searches; falls
@@ -264,18 +262,29 @@ progress_count() { # $1 count, $2 label, $3 project name, $4 region, $5 log file
 ####
 
 get_token() {
-  local now
+  # Cached as a file under $TMP_DIR (0600): every HTTP call chain runs inside
+  # $(...) subshells, so shell-variable caches never survive back to the
+  # parent — the file cache does, and it is shared across parallel workers.
+  local now exp token cache=''
   now=$(date +%s)
-  if [[ -n "$TOKEN" ]] && (( TOKEN_EXPIRY - now > 300 )); then
-    printf '%s' "$TOKEN"
-    return 0
+  if [[ -n "$TMP_DIR" ]]; then
+    cache="$TMP_DIR/token"
+    if [[ -r "$cache" ]]; then
+      { IFS= read -r exp && IFS= read -r token; } < "$cache" || token=''
+      if [[ -n "$token" && "$exp" =~ ^[0-9]+$ ]] && (( exp - now > 300 )); then
+        printf '%s' "$token"
+        return 0
+      fi
+    fi
   fi
-  if ! TOKEN=$(gcloud auth print-access-token 2>/dev/null); then
+  if ! token=$(gcloud auth print-access-token 2>/dev/null); then
     err "cannot acquire a token — run 'gcloud auth login' first"
     return 1
   fi
-  TOKEN_EXPIRY=$(( now + 3000 ))
-  printf '%s' "$TOKEN"
+  if [[ -n "$cache" ]]; then
+    ( umask 077; printf '%s\n%s\n' "$(( now + 3000 ))" "$token" > "$cache.$$" ) && mv -f "$cache.$$" "$cache"
+  fi
+  printf '%s' "$token"
 }
 
 ####
@@ -328,11 +337,14 @@ dry_run_plan() {
   echo
   if [[ -n "$PROJECTS" ]]; then
     echo "Scope: projects $PROJECTS (names via cloudresourcemanager v1 projects.get)"
+  elif [[ -n "$ORG_ID" ]]; then
+    echo "Scope: ACTIVE projects under organization $ORG_ID (org + its folder tree)"
+    echo '  GET https://cloudresourcemanager.googleapis.com/v2/folders?parent=organizations/'"$ORG_ID"' (recursive)'
+    echo '  GET https://cloudresourcemanager.googleapis.com/v1/projects   # filtered by parent'
   else
     echo 'Scope: every ACTIVE project the credentials can list'
     echo '  GET https://cloudresourcemanager.googleapis.com/v1/projects'
   fi
-  [[ -n "$ORG_ID" ]] && echo "Organization: $ORG_ID"
   echo
   if [[ "$MODE" != defend ]]; then
     if (( FAST )); then
@@ -577,14 +589,31 @@ cai_count() { # $1 scope (projects/x or organizations/y), $2 asset type, $3 quer
 }
 
 scan_scope_fast() { # $1 scope, $2 display name, $3 tmp prefix → prints 1 if CAI worked
+  # Fast is best-effort, never silently zero (§7): if ANY Cloud Asset
+  # Inventory query fails — not just the first — the partial fast counts are
+  # discarded and the caller falls back to the accurate path.
   local scope="$1" name="$2" prefix="$3"
   local counts="$prefix.counts" logf="$prefix.log"
   ERR_SINK="$prefix.errors"
   : > "$counts"; : > "$logf"
+  if scan_scope_fast_try "$scope" "$name" "$prefix"; then
+    (( IMAGES )) && status "- Registry Container Images pending in $name: not countable from the index; rerun without --fast"
+    ERR_SINK=''
+    printf 1
+  else
+    : > "$counts"; : > "$logf"   # discard partial fast rows; the accurate path recounts
+    ERR_SINK=''
+    printf 0
+  fi
+}
+
+scan_scope_fast_try() { # $1 scope, $2 display name, $3 tmp prefix; 1 on any CAI failure
+  local scope="$1" name="$2" prefix="$3"
+  local counts="$prefix.counts" logf="$prefix.log"
 
   local total gke vms
-  total=$(cai_count "$scope" 'compute.googleapis.com/Instance' '') || { ERR_SINK=''; printf 0; return 0; }
-  gke=$(cai_count "$scope" 'compute.googleapis.com/Instance' 'labels.goog-gke-node:*') || gke=0
+  total=$(cai_count "$scope" 'compute.googleapis.com/Instance' '') || return 1
+  gke=$(cai_count "$scope" 'compute.googleapis.com/Instance' 'labels.goog-gke-node:*') || return 1
   vms=$(( total - ${gke:-0} ))
   (( vms < 0 )) && vms=$total
   # The oracle counts GKE nodes in Virtual Machines too (gcp-v2:629-636)
@@ -595,33 +624,30 @@ scan_scope_fast() { # $1 scope, $2 display name, $3 tmp prefix → prints 1 if C
   progress_count "${gke:-0}" 'Container Hosts [GKE]' "$name" '' "$logf" '(label-indexed nodes, D2)'
 
   local n
-  n=$(cai_count "$scope" 'cloudfunctions.googleapis.com/CloudFunction' '') || n=0
+  n=$(cai_count "$scope" 'cloudfunctions.googleapis.com/CloudFunction' '') || return 1
   emit_count 'Serverless Functions' "${n:-0}" "$counts"
   progress_count "${n:-0}" 'Serverless Functions [Cloud Functions]' "$name" '' "$logf"
-  n=$(cai_count "$scope" 'run.googleapis.com/Revision' '') || n=0
+  n=$(cai_count "$scope" 'run.googleapis.com/Revision' '') || return 1
   emit_count 'Serverless Containers' "${n:-0}" "$counts"
   progress_count "${n:-0}" 'Serverless Containers [Cloud Run Revisions]' "$name" '' "$logf" '(all revisions, not only active — D6)'
   status '- GKE Autopilot serverless containers pending under --fast (pods-per-node not indexed; D2)'
 
   if (( DATA )); then
-    n=$(cai_count "$scope" 'storage.googleapis.com/Bucket' '') || n=0
+    n=$(cai_count "$scope" 'storage.googleapis.com/Bucket' '') || return 1
     (( n > 10000 )) && n=10000
     emit_count 'Data Buckets' "${n:-0}" "$counts"
     progress_count "${n:-0}" 'Data Buckets' "$name" '' "$logf"
-    n=$(cai_count "$scope" 'sqladmin.googleapis.com/Instance' '') || n=0
+    n=$(cai_count "$scope" 'sqladmin.googleapis.com/Instance' '') || return 1
     emit_count 'PaaS Databases' "${n:-0}" "$counts"
     progress_count "${n:-0}" 'PaaS Databases [Cloud SQL]' "$name" '' "$logf"
-    n=$(cai_count "$scope" 'spanner.googleapis.com/Instance' '') || n=0
+    n=$(cai_count "$scope" 'spanner.googleapis.com/Instance' '') || return 1
     emit_count 'PaaS Databases' "${n:-0}" "$counts"
     progress_count "${n:-0}" 'PaaS Databases [Spanner]' "$name" '' "$logf" '(instances, not databases — D6)'
-    n=$(cai_count "$scope" 'bigquery.googleapis.com/Dataset' '') || n=0
+    n=$(cai_count "$scope" 'bigquery.googleapis.com/Dataset' '') || return 1
     emit_count 'Data Warehouses' "${n:-0}" "$counts"
     progress_count "${n:-0}" 'Data Warehouses [BigQuery]' "$name" '' "$logf"
   fi
-  (( IMAGES )) && status "- Registry Container Images pending in $name: not countable from the index; rerun without --fast"
-
-  ERR_SINK=''
-  printf 1
+  return 0
 }
 
 ####
@@ -908,6 +934,21 @@ write_cloud_output() {
 # Scan orchestration — bounded parallelism, per-project temp files, resume (§11)
 ####
 
+enumerate_org_parents() { # → newline-separated parent IDs: the org + every folder under it (recursive)
+  local pending=("organizations/$ORG_ID") parent folders
+  printf '%s\n' "$ORG_ID"
+  while (( ${#pending[@]} > 0 )); do
+    parent=${pending[0]}
+    pending=("${pending[@]:1}")
+    folders=$(gcp_get_paged "https://cloudresourcemanager.googleapis.com/v2/folders?parent=$(urlencode "$parent")&pageSize=300" '.folders') || folders='[]'
+    while IFS= read -r parent; do
+      [[ -n "$parent" ]] || continue          # parent is "folders/<id>"
+      printf '%s\n' "${parent#folders/}"
+      pending+=("$parent")
+    done < <(jq -r '.[].name // empty' <<<"$folders")
+  done
+}
+
 enumerate_projects() { # → "id<TAB>name" lines
   if [[ -n "$PROJECTS" ]]; then
     local id detail
@@ -916,6 +957,20 @@ enumerate_projects() { # → "id<TAB>name" lines
         || { err "cannot read project $id"; continue; }
       jq -r '[ .projectId, (.name // "UNNAMED") ] | @tsv' <<<"$detail"
     done
+    return 0
+  fi
+  if [[ -n "$ORG_ID" ]]; then
+    # Org scope: keep only ACTIVE projects whose parent is the org itself or a
+    # folder under it, so accurate/Defend scans match the --fast org sweep.
+    # (projects.list carries each project's direct parent; the folder tree is
+    # walked via cloudresourcemanager v2 folders.list.)
+    local parents_json
+    parents_json=$(enumerate_org_parents | jq -R . | jq -cs .)
+    gcp_get_paged 'https://cloudresourcemanager.googleapis.com/v1/projects?pageSize=500' '.projects' \
+      | jq -r --argjson parents "$parents_json" \
+          '.[] | select(.lifecycleState == "ACTIVE")
+               | select((.parent.id // "") as $p | $parents | index($p))
+               | [ .projectId, (.name // "UNNAMED") ] | @tsv' | sort
     return 0
   fi
   # All ACTIVE listable projects, sorted by ID (gcp-v2:518-555)
